@@ -223,12 +223,14 @@ function productSectionUnlocked(mod) {
                     <component
                         v-for="mod in section.modules"
                         :key="mod.id"
-                        :is="productSectionNeedsCheckout(mod) ? 'a' : Link"
+                        :is="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? 'a' : Link"
                         :href="productSectionNeedsCheckout(mod)
                             ? (mod.related_product?.checkout_url || `/c/${mod.related_product?.checkout_slug}`)
-                            : (mod.embed ? `/m/${slug}/modulo/${mod.id}` : `/m/${mod.related_product?.member_area_slug ?? mod.related_product?.checkout_slug}`)"
-                        :target="productSectionNeedsCheckout(mod) ? '_blank' : undefined"
-                        :rel="productSectionNeedsCheckout(mod) ? 'noopener' : undefined"
+                            : (mod.related_product?.type === 'link'
+                                ? (mod.related_product?.deliverable_link || `${base_url}/products/${mod.related_product?.id}/deliverable`)
+                                : (mod.embed ? `${base_url}/modulo/${mod.id}` : `${base_url}/products/${mod.related_product?.id}/open`))"
+                        :target="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? '_blank' : undefined"
+                        :rel="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? 'noopener' : undefined"
                         class="flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
                     >
                         <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative w-full bg-zinc-700 flex items-center justify-center overflow-hidden']">
@@ -246,6 +248,7 @@ function productSectionUnlocked(mod) {
                                 <p v-if="mod.related_product?.name" class="truncate text-sm text-white/80">{{ mod.related_product.name }}</p>
                                 <span v-if="productSectionNeedsCheckout(mod)" class="mt-1 inline-block text-xs font-medium text-amber-300">Comprar para acessar</span>
                                 <span v-else-if="!isPaidProductSection(mod)" class="mt-1 inline-block text-xs font-medium text-white/80">Liberado</span>
+                                <span v-else-if="mod.related_product?.type === 'link'" class="mt-1 inline-block text-xs font-medium text-emerald-300">Abrir link</span>
                                 <span v-else class="mt-1 inline-block text-xs font-medium text-emerald-300">Acessar</span>
                             </div>
                         </div>

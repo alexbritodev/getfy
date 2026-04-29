@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ApiApplication;
 use App\Models\Product;
 use App\Models\UtmifyIntegration;
 use Illuminate\Http\JsonResponse;
@@ -17,10 +18,13 @@ class UtmifyController extends Controller
             'is_active' => ['boolean'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['string', 'exists:products,id'],
+            'api_application_ids' => ['nullable', 'array'],
+            'api_application_ids.*' => ['integer', 'exists:api_applications,id'],
         ]);
 
         $tenantId = auth()->user()->tenant_id;
         $this->ensureProductIdsBelongToTenant($tenantId, $validated['product_ids'] ?? []);
+        $this->ensureApiApplicationIdsBelongToTenant($tenantId, $validated['api_application_ids'] ?? []);
 
         $integration = UtmifyIntegration::create([
             'tenant_id' => $tenantId,
@@ -31,6 +35,9 @@ class UtmifyController extends Controller
 
         if (! empty($validated['product_ids'])) {
             $integration->products()->sync($validated['product_ids']);
+        }
+        if (! empty($validated['api_application_ids'])) {
+            $integration->apiApplications()->sync($validated['api_application_ids']);
         }
 
         return response()->json([
@@ -48,9 +55,12 @@ class UtmifyController extends Controller
             'is_active' => ['boolean'],
             'product_ids' => ['nullable', 'array'],
             'product_ids.*' => ['string', 'exists:products,id'],
+            'api_application_ids' => ['nullable', 'array'],
+            'api_application_ids.*' => ['integer', 'exists:api_applications,id'],
         ]);
 
         $this->ensureProductIdsBelongToTenant($utmify->tenant_id, $validated['product_ids'] ?? []);
+        $this->ensureApiApplicationIdsBelongToTenant($utmify->tenant_id, $validated['api_application_ids'] ?? []);
 
         $utmify->update([
             'name' => $validated['name'],
@@ -65,8 +75,11 @@ class UtmifyController extends Controller
         if (array_key_exists('product_ids', $validated)) {
             $utmify->products()->sync($validated['product_ids'] ?? []);
         }
+        if (array_key_exists('api_application_ids', $validated)) {
+            $utmify->apiApplications()->sync($validated['api_application_ids'] ?? []);
+        }
 
-        $utmify->load('products:id,name');
+        $utmify->load('products:id,name', 'apiApplications:id,name');
 
         return response()->json([
             'integration' => $this->integrationToArray($utmify),
@@ -77,6 +90,7 @@ class UtmifyController extends Controller
     {
         $this->authorizeIntegration($utmify);
         $utmify->products()->detach();
+        $utmify->apiApplications()->detach();
         $utmify->delete();
 
         return response()->json(null, 204);
@@ -106,7 +120,7 @@ class UtmifyController extends Controller
 
     private function integrationToArray(UtmifyIntegration $i): array
     {
-        $i->load('products:id,name');
+        $i->load('products:id,name', 'apiApplications:id,name');
 
         return [
             'id' => $i->id,
@@ -115,6 +129,22 @@ class UtmifyController extends Controller
             'configured' => $i->api_key !== null && $i->api_key !== '',
             'product_ids' => $i->products->pluck('id')->values()->all(),
             'products' => $i->products->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values()->all(),
+            'api_application_ids' => $i->apiApplications->pluck('id')->values()->all(),
+            'api_applications' => $i->apiApplications->map(fn ($a) => ['id' => $a->id, 'name' => $a->name])->values()->all(),
         ];
+    }
+
+    /**
+     * @param  array<int, int>  $apiApplicationIds
+     */
+    private function ensureApiApplicationIdsBelongToTenant(?int $tenantId, array $apiApplicationIds): void
+    {
+        if (empty($apiApplicationIds)) {
+            return;
+        }
+        $count = ApiApplication::forTenant($tenantId)->whereIn('id', $apiApplicationIds)->count();
+        if ($count !== count($apiApplicationIds)) {
+            abort(422, 'Uma ou mais aplicações da API não pertencem ao seu tenant.');
+        }
     }
 }

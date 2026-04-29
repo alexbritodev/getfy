@@ -103,6 +103,12 @@ Route::middleware('throttle:60,1')->group(function () {
         ->name('webhooks.gateway');
 });
 
+// Verificação pública de autenticidade do dossiê (resumo mascarado).
+Route::get('/verify/{code}', [\App\Http\Controllers\PublicProofVerifyController::class, 'show'])
+    ->where('code', '[0-9A-Za-z]{6,32}')
+    ->middleware('throttle:30,1')
+    ->name('public.proof.verify');
+
 // Assets de plugins (imagens, etc.): GET /plugins/{slug}/assets/{path} — arquivos em plugins/{slug}/assets/
 Route::get('/plugins/{slug}/assets/{path}', \App\Http\Controllers\PluginAssetController::class)
     ->where('path', '.+')
@@ -268,6 +274,16 @@ Route::middleware(['auth', 'admin.tenant', 'role:admin|infoprodutor|team', 'audi
         Route::get('/vendas/export', [\App\Http\Controllers\VendasController::class, 'export'])->name('vendas.export');
         Route::post('/vendas/{order}/resend-access-email', [\App\Http\Controllers\VendasController::class, 'resendAccessEmail'])->name('vendas.resend-access-email');
         Route::post('/vendas/{order}/approve-manually', [\App\Http\Controllers\VendasController::class, 'approveManually'])->name('vendas.approve-manually');
+
+        // Dossiê de comprovação (gateways/compliance)
+        Route::get('/vendas/{order}/comprovacao', [\App\Http\Controllers\ProofDocumentsController::class, 'show'])->name('vendas.proof.show');
+        Route::post('/vendas/{order}/comprovacao/gerar', [\App\Http\Controllers\ProofDocumentsController::class, 'generate'])->name('vendas.proof.generate');
+        Route::get('/vendas/{order}/comprovacao/pdf', [\App\Http\Controllers\ProofDocumentsController::class, 'pdf'])->name('vendas.proof.pdf');
+
+        // Exportação em lote (ZIP) com filtros
+        Route::get('/vendas/comprovacao/exportar', [\App\Http\Controllers\ProofExportsController::class, 'index'])->name('vendas.proof.export.index');
+        Route::post('/vendas/comprovacao/exportar/zip', [\App\Http\Controllers\ProofExportsController::class, 'exportZip'])->name('vendas.proof.export.zip');
+        Route::post('/vendas/comprovacao/exportar/pdf', [\App\Http\Controllers\ProofExportsController::class, 'exportPdf'])->name('vendas.proof.export.pdf');
     });
 
     Route::middleware('team.permission:produtos.view')->group(function () {
@@ -477,6 +493,13 @@ Route::prefix('m/{slug}')->where(['slug' => '[a-zA-Z0-9\-]{3,64}'])->middleware(
         Route::get('modulos', fn (string $slug) => redirect()->route('member-area-app.show', $slug))->name('member-area-app.modulos');
         Route::get('modulo/{module}', [\App\Http\Controllers\MemberAreaAppController::class, 'moduleContent'])->name('member-area-app.module');
         Route::get('aula/{lesson}', [\App\Http\Controllers\MemberAreaAppController::class, 'lesson'])->name('member-area-app.lesson');
+        // Outros produtos: abrir dentro da mesma área (resolve para módulo embutido) ou abrir deliverable (produto tipo Link)
+        Route::get('products/{relatedProduct}/open', [\App\Http\Controllers\MemberAreaAppController::class, 'openRelatedProduct'])
+            ->where('relatedProduct', '[0-9A-Za-z\\-]{1,64}')
+            ->name('member-area-app.products.open');
+        Route::get('products/{relatedProduct}/deliverable', [\App\Http\Controllers\MemberAreaAppController::class, 'openRelatedProductDeliverable'])
+            ->where('relatedProduct', '[0-9A-Za-z\\-]{1,64}')
+            ->name('member-area-app.products.deliverable');
         Route::get('aula/{lesson}/pdf/{fileIndex}', [\App\Http\Controllers\MemberAreaAppController::class, 'presentationPdf'])
             ->whereNumber('fileIndex')
             ->name('member-area-app.lesson.pdf');
@@ -531,6 +554,13 @@ Route::middleware(['web', 'member.area.resolve.by.host'])->group(function () {
         Route::get('modulos', [\App\Http\Controllers\MemberAreaAppController::class, 'modulos'])->name('member-area-app.modulos.host');
         Route::get('modulo/{module}', [\App\Http\Controllers\MemberAreaAppController::class, 'moduleContent'])->name('member-area-app.module.host');
         Route::get('aula/{lesson}', [\App\Http\Controllers\MemberAreaAppController::class, 'lesson'])->name('member-area-app.lesson.host');
+        // Outros produtos (modo host): abrir dentro da mesma área (resolve para módulo embutido) ou abrir deliverable (produto tipo Link)
+        Route::get('products/{relatedProduct}/open', [\App\Http\Controllers\MemberAreaAppController::class, 'openRelatedProduct'])
+            ->where('relatedProduct', '[0-9A-Za-z\\-]{1,64}')
+            ->name('member-area-app.products.open.host');
+        Route::get('products/{relatedProduct}/deliverable', [\App\Http\Controllers\MemberAreaAppController::class, 'openRelatedProductDeliverable'])
+            ->where('relatedProduct', '[0-9A-Za-z\\-]{1,64}')
+            ->name('member-area-app.products.deliverable.host');
         Route::get('aula/{lesson}/pdf/{fileIndex}', [\App\Http\Controllers\MemberAreaAppController::class, 'presentationPdf'])
             ->whereNumber('fileIndex')
             ->name('member-area-app.lesson.pdf.host');

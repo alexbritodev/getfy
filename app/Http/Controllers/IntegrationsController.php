@@ -9,6 +9,7 @@ use App\Models\Setting;
 use App\Models\CademiIntegration;
 use App\Models\SpedyIntegration;
 use App\Models\UtmifyIntegration;
+use App\Models\ApiApplication;
 use App\Models\Webhook;
 use App\Plugins\PluginRegistry;
 use Illuminate\Http\RedirectResponse;
@@ -82,7 +83,7 @@ class IntegrationsController extends Controller
         $webhookEvents = config('webhook_events.events', []);
 
         $utmifyIntegrations = UtmifyIntegration::forTenant($tenantId)
-            ->with('products:id,name')
+            ->with('products:id,name', 'apiApplications:id,name')
             ->orderBy('name')
             ->get()
             ->map(fn (UtmifyIntegration $i) => [
@@ -93,6 +94,8 @@ class IntegrationsController extends Controller
                 'api_key' => $i->api_key ?? '',
                 'product_ids' => $i->products->pluck('id')->values()->all(),
                 'products' => $i->products->map(fn ($p) => ['id' => $p->id, 'name' => $p->name])->values()->all(),
+                'api_application_ids' => $i->apiApplications->pluck('id')->values()->all(),
+                'api_applications' => $i->apiApplications->map(fn ($a) => ['id' => $a->id, 'name' => $a->name])->values()->all(),
             ])
             ->values()
             ->all();
@@ -132,6 +135,7 @@ class IntegrationsController extends Controller
             ->all();
 
         $products = Product::forTenant($tenantId)->orderBy('name')->get(['id', 'name']);
+        $apiApplications = ApiApplication::forTenant($tenantId)->orderBy('name')->get(['id', 'name']);
 
         return Inertia::render('Integrations/Index', [
             'gateways' => $gateways,
@@ -142,6 +146,7 @@ class IntegrationsController extends Controller
             'spedy_integrations' => $spedyIntegrations,
             'cademi_integrations' => $cademiIntegrations,
             'products' => $products,
+            'api_applications' => $apiApplications,
             'plugin_apps' => $pluginApps,
         ]);
     }

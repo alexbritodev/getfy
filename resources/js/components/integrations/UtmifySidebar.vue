@@ -10,6 +10,7 @@ const props = defineProps({
     open: { type: Boolean, default: false },
     utmify_integrations: { type: Array, default: () => [] },
     products: { type: Array, default: () => [] },
+    api_applications: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['close', 'saved']);
@@ -26,6 +27,7 @@ const form = ref({
     api_key: '',
     is_active: true,
     product_ids: [],
+    api_application_ids: [],
 });
 const saving = ref(false);
 const deleting = ref(null);
@@ -50,6 +52,7 @@ function resetForm() {
         api_key: '',
         is_active: true,
         product_ids: [],
+        api_application_ids: [],
     };
     errorMessage.value = null;
 }
@@ -62,6 +65,7 @@ function startNew() {
         api_key: '',
         is_active: true,
         product_ids: [],
+        api_application_ids: [],
     };
     errorMessage.value = null;
 }
@@ -74,6 +78,7 @@ function editIntegration(integration) {
         api_key: integration.api_key ?? '',
         is_active: integration.is_active ?? true,
         product_ids: [...(integration.product_ids || [])],
+        api_application_ids: [...(integration.api_application_ids || [])],
     };
     errorMessage.value = null;
 }
@@ -95,6 +100,19 @@ function isProductSelected(productId) {
     return form.value.product_ids.includes(productId);
 }
 
+function toggleApiApplication(appId) {
+    const idx = form.value.api_application_ids.indexOf(appId);
+    if (idx >= 0) {
+        form.value.api_application_ids.splice(idx, 1);
+    } else {
+        form.value.api_application_ids.push(appId);
+    }
+}
+
+function isApiApplicationSelected(appId) {
+    return form.value.api_application_ids.includes(appId);
+}
+
 async function save() {
     errorMessage.value = null;
     if (!form.value.name?.trim()) {
@@ -112,6 +130,7 @@ async function save() {
             name: form.value.name.trim(),
             is_active: form.value.is_active,
             product_ids: form.value.product_ids,
+            api_application_ids: form.value.api_application_ids,
         };
         if (form.value.api_key?.trim()) {
             payload.api_key = form.value.api_key.trim();
@@ -171,9 +190,13 @@ function close() {
 }
 
 function productSummary(integration) {
-    if (!integration.product_ids?.length) return 'Todos os produtos';
-    const n = integration.product_ids.length;
-    return n === 1 ? '1 produto' : `${n} produtos`;
+    const pn = integration.product_ids?.length || 0;
+    const an = integration.api_application_ids?.length || 0;
+    if (!pn && !an) return 'Todos os produtos';
+    const parts = [];
+    if (pn) parts.push(pn === 1 ? '1 produto' : `${pn} produtos`);
+    if (an) parts.push(an === 1 ? '1 app API' : `${an} apps API`);
+    return parts.join(' · ');
 }
 </script>
 
@@ -378,6 +401,36 @@ function productSummary(integration) {
                                 </div>
                                 <p v-else class="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
                                     Nenhum produto cadastrado.
+                                </p>
+                            </div>
+
+                            <div class="text-left">
+                                <span class="mb-2 block text-left text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                    Apps da API de pagamentos
+                                </span>
+                                <p class="mb-2 text-left text-xs text-zinc-500 dark:text-zinc-400">
+                                    Selecione as aplicações (Checkout Pro) para as quais esta integração enviará eventos. Deixe vazio para não filtrar por app.
+                                </p>
+                                <div
+                                    v-if="api_applications.length"
+                                    class="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-3 text-left dark:border-zinc-600 dark:bg-zinc-800"
+                                >
+                                    <label
+                                        v-for="a in api_applications"
+                                        :key="a.id"
+                                        class="flex cursor-pointer items-center justify-start gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-700/50"
+                                    >
+                                        <span class="shrink-0 w-fit">
+                                            <Checkbox
+                                                :model-value="isApiApplicationSelected(a.id)"
+                                                @update:model-value="toggleApiApplication(a.id)"
+                                            />
+                                        </span>
+                                        <span class="text-left text-sm text-zinc-900 dark:text-white">{{ a.name }}</span>
+                                    </label>
+                                </div>
+                                <p v-else class="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
+                                    Nenhuma aplicação cadastrada.
                                 </p>
                             </div>
                         </div>

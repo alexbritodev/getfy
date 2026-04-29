@@ -69,7 +69,7 @@ class UtmifyEventSubscriber
 
         $integrations = UtmifyIntegration::forTenant($tenantId)
             ->where('is_active', true)
-            ->with('products:id')
+            ->with('products:id', 'apiApplications:id')
             ->get();
 
         foreach ($integrations as $integration) {

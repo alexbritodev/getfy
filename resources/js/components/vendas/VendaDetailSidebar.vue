@@ -217,6 +217,25 @@ function itemLabel(item) {
                                 <p v-else class="text-sm text-zinc-500">–</p>
                             </div>
                             <div class="space-y-1">
+                                <p class="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                                    Comprovação
+                                    <span
+                                        class="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-zinc-200 text-[10px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+                                        title="Gera um dossiê com dados do comprador + evidências de entrega/atividade (progresso, logs, IP). Útil para comprovar a venda em gateways (MED/chargeback/auditoria)."
+                                    >
+                                        ?
+                                    </span>
+                                </p>
+                                <a
+                                    :href="`/vendas/${venda.id}/comprovacao`"
+                                    class="inline-flex items-center gap-1 text-sm text-[var(--color-primary)] hover:underline"
+                                    title="Abrir dossiê de comprovação (documento para comprovar a venda e o acesso/atividade do aluno)"
+                                >
+                                    Abrir dossiê de comprovação
+                                    <ExternalLink class="h-3.5 w-3.5 shrink-0" />
+                                </a>
+                            </div>
+                            <div class="space-y-1">
                                 <p class="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">utm_source</p>
                                 <p class="text-sm" :class="utmSource ? 'text-zinc-900 dark:text-white' : 'text-zinc-500'">
                                     {{ utmSource || 'Não informado' }}

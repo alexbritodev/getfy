@@ -94,6 +94,7 @@ class ApiApplicationsController extends Controller
         $tenantId = auth()->user()->tenant_id;
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'conversion_pixels' => ['nullable', 'array'],
             'payment_gateways' => ['nullable', 'array'],
             'payment_gateways.pix' => ['nullable', 'string', 'max:64'],
             'payment_gateways.pix_redundancy' => ['nullable', 'array'],
@@ -147,6 +148,7 @@ class ApiApplicationsController extends Controller
             'name' => $validated['name'],
             'slug' => $slug,
             'api_key_hash' => $apiKeyHash,
+            'conversion_pixels' => $validated['conversion_pixels'] ?? null,
             'payment_gateways' => $paymentGateways,
             'allowed_ips' => $allowedIps,
             'webhook_url' => $validated['webhook_url'] ?? null,
@@ -179,6 +181,7 @@ class ApiApplicationsController extends Controller
                 'slug' => $apiApplication->slug,
                 'logo_url' => $logoUrl,
                 'checkout_sidebar_bg' => $apiApplication->checkout_sidebar_bg,
+                'conversion_pixels' => $apiApplication->conversion_pixels ?? null,
                 'payment_gateways' => $pg,
                 'webhook_url' => $apiApplication->webhook_url,
                 'default_return_url' => $apiApplication->default_return_url,
@@ -197,6 +200,7 @@ class ApiApplicationsController extends Controller
         $this->authorizeTenant($apiApplication);
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'conversion_pixels' => ['nullable', 'array'],
             'payment_gateways' => ['nullable', 'array'],
             'payment_gateways.pix' => ['nullable', 'string', 'max:64'],
             'payment_gateways.pix_redundancy' => ['nullable', 'array'],
@@ -247,6 +251,7 @@ class ApiApplicationsController extends Controller
         }
         $apiApplication->update([
             'name' => $validated['name'],
+            'conversion_pixels' => $validated['conversion_pixels'] ?? null,
             'payment_gateways' => $paymentGateways,
             'allowed_ips' => $allowedIps,
             'webhook_url' => $validated['webhook_url'] ?? null,

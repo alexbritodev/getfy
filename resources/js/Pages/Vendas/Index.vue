@@ -350,6 +350,10 @@ const exportXlsUrl = computed(() => {
     const params = new URLSearchParams({ ...buildQuery(), format: 'xls' });
     return `/vendas/export?${params.toString()}`;
 });
+
+function openProofExport() {
+    window.open('/vendas/comprovacao/exportar', '_blank', 'noopener,noreferrer');
+}
 </script>
 
 <template>
@@ -358,7 +362,16 @@ const exportXlsUrl = computed(() => {
 
         <!-- Cards de métricas -->
         <div class="space-y-3">
-            <div class="flex justify-end">
+            <div class="flex items-center justify-end gap-2">
+                <button
+                    type="button"
+                    class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                    @click="openProofExport"
+                    title="Exportar comprovações (ZIP)"
+                >
+                    <FileText class="h-4 w-4" />
+                    Comprovação
+                </button>
                 <button
                     type="button"
                     :aria-label="valuesVisible ? 'Ocultar valores' : 'Mostrar valores'"

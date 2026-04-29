@@ -1,20 +1,36 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { Head } from '@inertiajs/vue3';
+import ConversionPixels from '@/components/checkout/ConversionPixels.vue';
 
 defineOptions({ layout: null });
 
 const props = defineProps({
     order_id: { type: Number, required: true },
+    order_amount: { type: Number, default: 0 },
+    order_currency: { type: String, default: 'BRL' },
+    conversion_pixels: { type: Object, default: () => ({}) },
     return_url: { type: String, required: true },
     seconds: { type: Number, default: 5 },
 });
+
+const conversionPixelsRef = ref(null);
+let purchaseFiredForLoad = false;
 
 const secondsLeft = ref(Math.max(0, Number(props.seconds || 0)));
 let intervalId = null;
 let timeoutId = null;
 
 const safeUrl = computed(() => (props.return_url || '').trim() || '/');
+
+function onConversionPixelsReady() {
+    if (purchaseFiredForLoad) return;
+    if (!props.order_id || !(Number(props.order_amount) > 0)) return;
+    const api = conversionPixelsRef.value;
+    if (!api?.firePurchase) return;
+    purchaseFiredForLoad = true;
+    api.firePurchase(props.order_amount, (props.order_currency || 'BRL').toUpperCase(), String(props.order_id), false, 'approved');
+}
 
 function goNow() {
     window.location.href = safeUrl.value;
@@ -38,6 +54,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+    <ConversionPixels ref="conversionPixelsRef" :pixels="props.conversion_pixels" @ready="onConversionPixelsReady" />
     <Head title="Pagamento confirmado" />
     <div class="min-h-screen bg-gray-100 flex items-center justify-center p-6">
         <div class="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-lg text-center">

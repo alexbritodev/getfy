@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ApiCheckoutSession;
 use App\Models\CheckoutSession;
 use App\Models\Order;
 use Illuminate\Support\Facades\Http;
@@ -34,6 +35,15 @@ class UtmifyService
         $order->loadMissing(['user', 'orderItems.product', 'orderItems.productOffer', 'orderItems.subscriptionPlan']);
 
         $session = CheckoutSession::where('order_id', $order->id)->first();
+        $apiSession = null;
+        if (! $session) {
+            if ($order->api_checkout_session_id !== null) {
+                $apiSession = ApiCheckoutSession::find($order->api_checkout_session_id);
+            }
+            if (! $apiSession) {
+                $apiSession = ApiCheckoutSession::where('order_id', $order->id)->first();
+            }
+        }
 
         $orderId = $order->gateway_id ?: (string) $order->id;
         $paymentMethod = $this->mapPaymentMethod($order->gateway);
@@ -41,7 +51,13 @@ class UtmifyService
         $approvedDate = $options['approved_at'] ?? ($utmifyStatus === 'paid' ? $order->updated_at->utc()->format('Y-m-d H:i:s') : null);
         $refundedAt = $options['refunded_at'] ?? null;
 
-        $customerName = $session?->name ?? $order->user?->name ?? '';
+        $apiCustomer = $apiSession?->customer;
+        $apiCustomer = is_array($apiCustomer) ? $apiCustomer : [];
+
+        $customerName = $session?->name
+            ?? (string) ($apiCustomer['name'] ?? '')
+            ?? $order->user?->name
+            ?? '';
         $customer = [
             'name' => $customerName,
             'email' => $order->email ?? '',
@@ -83,14 +99,17 @@ class UtmifyService
             ];
         }
 
+        $apiMeta = $apiSession?->metadata;
+        $apiMeta = is_array($apiMeta) ? $apiMeta : [];
+
         $trackingParameters = [
-            'src' => null,
-            'sck' => null,
-            'utm_source' => $session?->utm_source,
-            'utm_campaign' => $session?->utm_campaign,
-            'utm_medium' => $session?->utm_medium,
-            'utm_content' => null,
-            'utm_term' => null,
+            'src' => $apiMeta['src'] ?? null,
+            'sck' => $apiMeta['sck'] ?? null,
+            'utm_source' => $session?->utm_source ?? ($apiMeta['utm_source'] ?? null),
+            'utm_campaign' => $session?->utm_campaign ?? ($apiMeta['utm_campaign'] ?? null),
+            'utm_medium' => $session?->utm_medium ?? ($apiMeta['utm_medium'] ?? null),
+            'utm_content' => $apiMeta['utm_content'] ?? null,
+            'utm_term' => $apiMeta['utm_term'] ?? null,
         ];
 
         $totalCents = (int) round((float) $order->amount * 100);

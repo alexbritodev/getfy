@@ -46,7 +46,14 @@ $SUDO "${GIT_BASE[@]}" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
 HAS_LOCAL_CHANGES=0
 if [ -n "$($SUDO "${GIT_BASE[@]}" status --porcelain 2>/dev/null || true)" ]; then
   HAS_LOCAL_CHANGES=1
-  $SUDO "${GIT_BASE[@]}" stash push -u -m "getfy-update" >/dev/null 2>&1 || true
+  # IMPORTANT:
+  # Do not stash runtime/config files (they are untracked by design).
+  # If we stash -u and stash pop fails, the app may boot with a regenerated .env/.docker state,
+  # causing forced logout and "looks like password changed" reports.
+  $SUDO "${GIT_BASE[@]}" stash push -u -m "getfy-update" -- . \
+    ':!.env' \
+    ':!.docker' \
+    >/dev/null 2>&1 || true
 fi
 
 $SUDO "${GIT_BASE[@]}" fetch --all --prune

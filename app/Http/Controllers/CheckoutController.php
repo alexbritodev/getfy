@@ -1376,6 +1376,12 @@ class CheckoutController extends Controller
 
         $product = $order->product;
         $conversionPixels = $product ? ($product->conversion_pixels ?? Product::defaultConversionPixels()) : Product::defaultConversionPixels();
+        if ($order->api_application_id) {
+            $order->loadMissing('apiApplication');
+            if ($order->apiApplication?->conversion_pixels) {
+                $conversionPixels = $order->apiApplication->conversion_pixels;
+            }
+        }
 
         return Inertia::render('Checkout/Pix', [
             'token' => $token,
@@ -1424,6 +1430,12 @@ class CheckoutController extends Controller
 
         $product = $order->product;
         $conversionPixels = $product ? ($product->conversion_pixels ?? Product::defaultConversionPixels()) : Product::defaultConversionPixels();
+        if ($order->api_application_id) {
+            $order->loadMissing('apiApplication');
+            if ($order->apiApplication?->conversion_pixels) {
+                $conversionPixels = $order->apiApplication->conversion_pixels;
+            }
+        }
         $amount = (float) ($stored['amount'] ?? $order->amount ?? 0);
 
         return Inertia::render('Checkout/Boleto', [

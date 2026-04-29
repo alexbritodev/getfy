@@ -8,6 +8,7 @@ use App\Models\MemberCommunityPage;
 use App\Models\MemberCommunityPost;
 use App\Models\MemberCommunityPostComment;
 use App\Models\MemberCommunityPostLike;
+use App\Models\MemberActivityLog;
 use App\Models\MemberInternalProduct;
 use App\Models\MemberLesson;
 use App\Models\MemberLessonProgress;
@@ -39,10 +40,37 @@ class MemberAreaAppController extends Controller
         protected GamificationService $gamificationService
     ) {}
 
+    /**
+     * Best-effort activity log for proof/compliance. Must never break student UX.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function logMemberActivity(Request $request, Product $product, ?User $user, string $event, array $metadata = []): void
+    {
+        try {
+            MemberActivityLog::create([
+                'tenant_id' => $product->tenant_id ?? $user?->tenant_id,
+                'user_id' => $user?->id,
+                'product_id' => $product->id,
+                'event' => $event,
+                'metadata' => $metadata,
+                'ip' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+            ]);
+        } catch (\Throwable) {
+            // ignore (best-effort)
+        }
+    }
+
     public function show(Request $request, string $slug): Response
     {
         $product = $this->getProduct($request);
         $user = $request->user();
+
+        $this->logMemberActivity($request, $product, $user, 'member_area.open', [
+            'path' => '/' . ltrim($request->path(), '/'),
+        ]);
+
         $accessStartAt = $this->userAccessStartAt($product, $user);
         $now = now();
         $config = $product->member_area_config;
@@ -300,6 +328,13 @@ class MemberAreaAppController extends Controller
         }
         $this->progressService->ensureLessonStarted($lesson, $user);
 
+        $this->logMemberActivity($request, $product, $user, 'member_area.lesson_view', [
+            'lesson_id' => $lesson->id,
+            'lesson_product_id' => $lesson->product_id,
+            'module_id' => $lesson->module?->id,
+            'embedded' => $wrapper !== null,
+        ]);
+
         $sectionPayload = null;
         if ($wrapper !== null) {
             $wrapper->loadMissing('section');
@@ -422,6 +457,12 @@ class MemberAreaAppController extends Controller
             }
         }
         $this->progressService->markLessonCompleted($lesson->id, $user);
+
+        $this->logMemberActivity($request, $product, $user, 'member_area.lesson_complete', [
+            'lesson_id' => $lesson->id,
+            'lesson_product_id' => $lesson->product_id,
+            'embedded' => $wrapper !== null,
+        ]);
 
         $newlyUnlocked = $this->gamificationService->checkAndUnlock($product, $user);
         if ($newlyUnlocked !== []) {
@@ -958,6 +999,160 @@ class MemberAreaAppController extends Controller
         return str_ends_with($name, '.host') ? 'member-area-app.modulos.host' : 'member-area-app.modulos';
     }
 
+    /**
+     * Abertura de "outros produtos" mantendo o contexto da área atual.
+     *
+     * - Se o produto relacionado é "Link": redireciona para o endpoint deliverable.
+     * - Se for área de membros: redireciona para o primeiro módulo embutido (wrapper) dentro do produto host.
+     */
+    public function openRelatedProduct(Request $request, string $relatedProduct): RedirectResponse
+    {
+        $host = $this->getProduct($request);
+        $user = $request->user();
+
+        $slug = (string) ($request->attributes->get('member_area_slug') ?? $request->route('slug') ?? '');
+        $slug = $slug !== '' ? $slug : (string) ($host->checkout_slug ?? '');
+
+        if (! $user instanceof User) {
+            // In host-based member areas, GET /login is handled by the platform login controller.
+            $isHost = str_ends_with(($request->route()?->getName() ?? ''), '.host');
+            return $isHost
+                ? redirect()->to('/login')->with('error', 'Faça login para acessar a área de membros.')
+                : redirect()->route('member-area.login', ['slug' => $slug])->with('error', 'Faça login para acessar a área de membros.');
+        }
+
+        $relatedId = ctype_digit($relatedProduct) ? (int) $relatedProduct : $relatedProduct;
+        $related = Product::find($relatedId);
+        if (! $related) {
+            return redirect()->to($this->baseUrlForRequest($host, $request))
+                ->with('error', 'Produto relacionado não encontrado ou indisponível.');
+        }
+
+        if ($related->type === Product::TYPE_LINK) {
+            return redirect()->route($this->memberAreaProductsDeliverableRouteName($request), $this->memberAreaProductsRouteParams($request, $slug, $relatedProduct));
+        }
+
+        $wrapper = MemberModule::query()
+            ->where('product_id', $host->id)
+            ->where('related_product_id', $related->id)
+            ->whereNotNull('source_member_module_id')
+            ->orderBy('position')
+            ->first();
+
+        if (! $wrapper) {
+            return redirect()->to($this->baseUrlForRequest($host, $request))
+                ->with('error', 'Este produto ainda não foi embutido nesta área. No Member Builder, adicione/importa os módulos do produto para esta seção.');
+        }
+
+        $redirect = $this->assertEmbeddedProductLinkAccess($wrapper, $user);
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        return redirect()->route(
+            $this->memberAreaModuleRouteName($request),
+            $this->memberAreaModuleRouteParams($request, $slug, (string) $wrapper->id)
+        );
+    }
+
+    /**
+     * Endpoint dedicado para abrir o deliverable de produtos do tipo "Link" a partir da área de membros.
+     * Deve ser usado com target=_blank no front.
+     */
+    public function openRelatedProductDeliverable(Request $request, string $relatedProduct): RedirectResponse
+    {
+        $host = $this->getProduct($request);
+        $user = $request->user();
+
+        $slug = (string) ($request->attributes->get('member_area_slug') ?? $request->route('slug') ?? '');
+        $slug = $slug !== '' ? $slug : (string) ($host->checkout_slug ?? '');
+
+        if (! $user instanceof User) {
+            $isHost = str_ends_with(($request->route()?->getName() ?? ''), '.host');
+            return $isHost
+                ? redirect()->to('/login')->with('error', 'Faça login para acessar a área de membros.')
+                : redirect()->route('member-area.login', ['slug' => $slug])->with('error', 'Faça login para acessar a área de membros.');
+        }
+
+        // 1) Tenta resolver via card/wrapper do próprio host (fonte mais confiável do contexto "paid/free")
+        $anyWrapperOrCard = MemberModule::query()
+            ->with('relatedProduct')
+            ->where('product_id', $host->id)
+            ->where('related_product_id', $relatedProduct)
+            ->orderBy('position')
+            ->first();
+
+        $related = $anyWrapperOrCard?->relatedProduct;
+
+        // 2) Fallback: resolver pelo id diretamente (não depende de ter card importado)
+        if (! $related) {
+            $relatedId = ctype_digit($relatedProduct) ? (int) $relatedProduct : $relatedProduct;
+            $related = Product::find($relatedId);
+        }
+
+        if (! $related) {
+            return redirect()->to($this->baseUrlForRequest($host, $request))
+                ->with('error', 'Produto relacionado não encontrado ou indisponível.');
+        }
+
+        // Gate de acesso: se existir card/wrapper no host, respeita paid/free e acesso do usuário.
+        if ($anyWrapperOrCard) {
+            $redirect = $this->assertEmbeddedProductLinkAccess($anyWrapperOrCard, $user);
+            if ($redirect !== null) {
+                return $redirect;
+            }
+        }
+
+        // Abrir deliverable (produto tipo Link)
+        if ($related->type === Product::TYPE_LINK) {
+            $config = is_array($related->checkout_config) ? $related->checkout_config : [];
+            $link = $config['deliverable_link'] ?? '';
+            $link = is_string($link) ? trim($link) : '';
+            if ($link !== '') {
+                return str_starts_with($link, 'http://') || str_starts_with($link, 'https://')
+                    ? redirect()->away($link)
+                    : redirect('/' . ltrim($link, '/'));
+            }
+            return redirect()->to($this->baseUrlForRequest($host, $request))
+                ->with('error', 'Este produto está como tipo Link, mas o link de entrega não foi configurado.');
+        }
+
+        return redirect()->route(
+            $this->memberAreaProductsOpenRouteName($request),
+            $this->memberAreaProductsRouteParams($request, $slug, $relatedProduct)
+        );
+    }
+
+    private function memberAreaProductsOpenRouteName(Request $request): string
+    {
+        $name = $request->route()?->getName() ?? '';
+        return str_ends_with($name, '.host') ? 'member-area-app.products.open.host' : 'member-area-app.products.open';
+    }
+
+    private function memberAreaProductsDeliverableRouteName(Request $request): string
+    {
+        $name = $request->route()?->getName() ?? '';
+        return str_ends_with($name, '.host') ? 'member-area-app.products.deliverable.host' : 'member-area-app.products.deliverable';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function memberAreaProductsRouteParams(Request $request, string $slug, string $productId): array
+    {
+        $isHost = str_ends_with(($request->route()?->getName() ?? ''), '.host');
+        return $isHost ? ['relatedProduct' => $productId] : ['slug' => $slug, 'relatedProduct' => $productId];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function memberAreaModuleRouteParams(Request $request, string $slug, string $moduleId): array
+    {
+        $isHost = str_ends_with(($request->route()?->getName() ?? ''), '.host');
+        return $isHost ? ['module' => $moduleId] : ['slug' => $slug, 'module' => $moduleId];
+    }
+
     private function assertEmbeddedProductLinkAccess(MemberModule $wrapper, User $user): ?RedirectResponse
     {
         if (! $wrapper->related_product_id) {
@@ -1060,6 +1255,13 @@ class MemberAreaAppController extends Controller
             $accessType = $m->access_type ?? 'paid';
             $isFree = $accessType === 'free';
             $canOpenEmbed = $embed && ($isFree || $hasAccess);
+            $deliverableLink = null;
+            if ($related && $related->type === Product::TYPE_LINK && ($isFree || $hasAccess)) {
+                $cfg = is_array($related->checkout_config) ? $related->checkout_config : [];
+                $raw = $cfg['deliverable_link'] ?? '';
+                $raw = is_string($raw) ? trim($raw) : '';
+                $deliverableLink = $raw !== '' ? $raw : null;
+            }
 
             return [
                 'id' => $m->id,
@@ -1073,6 +1275,8 @@ class MemberAreaAppController extends Controller
                 'related_product' => $related ? [
                     'id' => $related->id,
                     'name' => $related->name,
+                    'type' => $related->type,
+                    'deliverable_link' => $deliverableLink,
                     'image_url' => $related->image ? (new StorageService($product->tenant_id))->url($related->image) : null,
                     'checkout_slug' => $related->checkout_slug,
                     'checkout_url' => url('/c/'.$related->checkout_slug),

@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Head, useForm, usePage, router } from '@inertiajs/vue3';
 import { QrCode, Barcode, CreditCard, Receipt, ShieldCheck, AlertCircle, ArrowLeft } from 'lucide-vue-next';
+import ConversionPixels from '@/components/checkout/ConversionPixels.vue';
 import {
     API_CHECKOUT_PAGARME_TOKENIZE_FORM_ID,
     PAGARME_TOKENIZE_FORM_ACTION,
@@ -18,6 +19,7 @@ const props = defineProps({
     app_name: { type: String, default: '' },
     app_logo_url: { type: String, default: null },
     app_sidebar_bg_color: { type: String, default: '#18181b' },
+    conversion_pixels: { type: Object, default: () => ({}) },
     customer_email: { type: String, default: null },
     customer_name: { type: String, default: null },
     customer_cpf: { type: String, default: null },
@@ -438,6 +440,7 @@ async function submitCard(ev) {
 </script>
 
 <template>
+    <ConversionPixels :pixels="props.conversion_pixels" />
     <Head>
         <title>{{ app_name ? `${app_name} – Pagamento` : 'Pagamento' }}</title>
     </Head>

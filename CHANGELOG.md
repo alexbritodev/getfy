@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.13] - 29-04-2026
+
+### Novidades
+
+- **Comprovação (Dossiê) para gateways / MED / chargeback**:
+  - Página por venda para **gerar dossiê** com dados do comprador, produto e evidências (progresso, aulas concluídas, logs, IP, UTMs).
+  - **Exportação em PDF** por período com filtros (data, produto, forma de pagamento e status) para enviar ao gateway.
+  - **Código de verificação** + página pública `/verify/{code}` com resumo mascarado para validar autenticidade.
+  - Logs de atividade do aluno na área de membros (abertura, visualização e conclusão de aulas, magic link).
+
+- **API de pagamentos (Checkout Pro)**:
+  - Suporte a **pixels de conversão por aplicação** (configuráveis em Aplicações da API), com disparo de **Purchase** no fluxo hospedado.
+  - Integração com **UTMfy**: captura/persistência de **UTMs/src/sck** no checkout hospedado e envio correto no payload da UTMfy.
+
+- **UTMfy (Integrações)**:
+  - Agora é possível **selecionar também as “Aplicações da API de pagamentos”** (além de produtos) para filtrar quais pedidos disparam eventos.
+
+- **White Label**:
+  - E-mails padrão do sistema (ex.: **recuperação de senha** e **confirmação de e-mail**) agora usam **nome e logo** configurados no White Label quando o plugin estiver ativo.
+
+### Correções
+
+- **Área de membros (Outros produtos)**:
+  - Ao clicar em um “outro produto” do tipo **Área de membros**, as aulas passam a abrir **dentro da mesma área de membros (hub/host)**, preservando navegação (voltar, contexto etc.), em vez de redirecionar para `/m/{slug}` do outro produto.
+  - Produtos do tipo **Link** agora abrem o **link de entrega** em nova aba, evitando **404**.
+
 ## [1.0.12] - 26-04-2026
 
 ### Correções

@@ -1,7 +1,7 @@
 <x-mail::message>
 {{-- Logo --}}
 @if (! empty($logoUrl))
-<img src="{{ $logoUrl }}" alt="{{ config('app.name') }}" style="max-width: 200px; margin-bottom: 1.5rem; display: block;">
+<img src="{{ $logoUrl }}" alt="{{ $appName ?? config('app.name') }}" style="max-width: 200px; margin-bottom: 1.5rem; display: block;">
 
 @endif
 {{-- Greeting --}}
@@ -45,7 +45,7 @@
 {{ $salutation }}
 @else
 Atenciosamente,<br>
-{{ config('app.name') }}
+{{ $appName ?? config('app.name') }}
 @endif
 
 {{-- Subcopy --}}

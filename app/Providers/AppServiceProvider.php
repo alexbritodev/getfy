@@ -16,6 +16,7 @@ use App\Listeners\SendApiApplicationWebhookListener;
 use App\Listeners\WebhookEventSubscriber;
 use App\Support\DockerSetupState;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
+use App\Plugins\PluginRegistry;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -85,6 +87,19 @@ class AppServiceProvider extends ServiceProvider
         Event::subscribe(SpedyEventSubscriber::class);
         Event::subscribe(CademiEventSubscriber::class);
 
+        VerifyEmail::toMailUsing(function (object $notifiable, string $verificationUrl) {
+            [$appName, $logoUrl] = $this->resolveWhiteLabelEmailBranding($notifiable);
+
+            return (new MailMessage)
+                ->from((string) config('mail.from.address'), $appName)
+                ->markdown('notifications::email', ['logoUrl' => $logoUrl, 'appName' => $appName])
+                ->subject('Confirme seu e-mail')
+                ->greeting('Olá!')
+                ->line('Clique no botão abaixo para confirmar seu endereço de e-mail.')
+                ->action('Confirmar e-mail', $verificationUrl)
+                ->line('Se você não criou uma conta, nenhuma ação é necessária.');
+        });
+
         ResetPassword::toMailUsing(function (object $notifiable, string $token) {
             $params = [
                 'token' => $token,
@@ -96,9 +111,11 @@ class AppServiceProvider extends ServiceProvider
             }
             $url = url(route('password.reset', $params, false));
             $expire = config('auth.passwords.'.config('auth.defaults.passwords').'.expire');
+            [$appName, $logoUrl] = $this->resolveWhiteLabelEmailBranding($notifiable);
 
             return (new MailMessage)
-                ->markdown('notifications::email', ['logoUrl' => 'https://cdn.getfy.cloud/logo-white.png'])
+                ->from((string) config('mail.from.address'), $appName)
+                ->markdown('notifications::email', ['logoUrl' => $logoUrl, 'appName' => $appName])
                 ->subject('Redefinição de senha')
                 ->greeting('Olá!')
                 ->line('Você está recebendo este e-mail porque recebemos uma solicitação de redefinição de senha da sua conta.')
@@ -106,6 +123,71 @@ class AppServiceProvider extends ServiceProvider
                 ->line('Este link expira em '.$expire.' minutos.')
                 ->line('Se você não solicitou a redefinição de senha, nenhuma ação é necessária.');
         });
+    }
+
+    /**
+     * @return array{0: string, 1: string|null} [appName, logoUrl]
+     */
+    private function resolveWhiteLabelEmailBranding(object $notifiable): array
+    {
+        $defaultName = (string) config('app.name', 'Getfy');
+        $defaultLogo = 'https://cdn.getfy.cloud/logo-white.png';
+
+        try {
+            $enabled = collect(PluginRegistry::enabled())->contains(fn ($p) => ($p['slug'] ?? null) === 'white-label');
+            if (! $enabled) {
+                return [$defaultName, $defaultLogo];
+            }
+        } catch (\Throwable) {
+            return [$defaultName, $defaultLogo];
+        }
+
+        if (! class_exists(\Plugins\WhiteLabel\WhiteLabelSetting::class) || ! class_exists(\Plugins\WhiteLabel\ApplyWhiteLabelConfig::class)) {
+            return [$defaultName, $defaultLogo];
+        }
+
+        try {
+            if (! \Illuminate\Support\Facades\Schema::hasTable('white_label_settings')) {
+                return [$defaultName, $defaultLogo];
+            }
+        } catch (\Throwable) {
+            return [$defaultName, $defaultLogo];
+        }
+
+        $tenantId = null;
+        try {
+            $tenantId = $notifiable->tenant_id ?? null;
+        } catch (\Throwable) {
+            $tenantId = null;
+        }
+
+        try {
+            $global = \Plugins\WhiteLabel\WhiteLabelSetting::query()->whereNull('tenant_id')->first();
+            $tenant = $tenantId !== null
+                ? \Plugins\WhiteLabel\WhiteLabelSetting::query()->where('tenant_id', $tenantId)->first()
+                : null;
+
+            $globalData = is_array($global?->data) ? $global->data : [];
+            $tenantData = is_array($tenant?->data) ? $tenant->data : [];
+            $branding = \Plugins\WhiteLabel\ApplyWhiteLabelConfig::mergeLayers($globalData, $tenantData);
+
+            $appName = trim((string) ($branding['app_name'] ?? ''));
+            if ($appName === '') {
+                $appName = $defaultName;
+            }
+
+            $logoUrl = null;
+            $logoRaw = trim((string) ($branding['app_logo'] ?? ''));
+            if ($logoRaw !== '' && filter_var($logoRaw, FILTER_VALIDATE_URL)) {
+                $logoUrl = $logoRaw;
+            } else {
+                $logoUrl = $defaultLogo;
+            }
+
+            return [$appName, $logoUrl];
+        } catch (\Throwable) {
+            return [$defaultName, $defaultLogo];
+        }
     }
 
     private function bootCloudFolder(): void

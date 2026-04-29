@@ -58,6 +58,7 @@ const props = defineProps({
     spedy_integrations: { type: Array, default: () => [] },
     cademi_integrations: { type: Array, default: () => [] },
     products: { type: Array, default: () => [] },
+    api_applications: { type: Array, default: () => [] },
     plugin_apps: { type: Array, default: () => [] },
 });
 
@@ -196,7 +197,7 @@ function onWebhookSaved() {
 
 function onUtmifySaved() {
     // Recarrega só a lista de integrações para não perder o valor do input da chave no sidebar
-    router.reload({ only: ['utmify_integrations', 'products'] });
+    router.reload({ only: ['utmify_integrations', 'products', 'api_applications'] });
 }
 
 function onSpedySaved() {
@@ -322,6 +323,7 @@ function setTab(tabId) {
             :open="utmifySidebarOpen"
             :utmify_integrations="utmify_integrations"
             :products="products"
+            :api_applications="api_applications"
             @close="closeUtmifySidebar"
             @saved="onUtmifySaved"
         />

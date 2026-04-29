@@ -14,6 +14,7 @@ class ApiApplication extends Model
         'slug',
         'logo',
         'checkout_sidebar_bg',
+        'conversion_pixels',
         'api_key_hash',
         'payment_gateways',
         'allowed_ips',
@@ -28,6 +29,7 @@ class ApiApplication extends Model
         return [
             'payment_gateways' => 'array',
             'allowed_ips' => 'array',
+            'conversion_pixels' => 'array',
             'is_active' => 'boolean',
         ];
     }

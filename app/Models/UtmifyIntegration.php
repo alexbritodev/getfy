@@ -42,6 +42,12 @@ class UtmifyIntegration extends Model
             ->withTimestamps();
     }
 
+    public function apiApplications(): BelongsToMany
+    {
+        return $this->belongsToMany(ApiApplication::class, 'utmify_integration_api_application')
+            ->withTimestamps();
+    }
+
     /**
      * IDs de produtos vinculados à integração (string), para comparação estável com o pedido.
      *
@@ -54,6 +60,20 @@ class UtmifyIntegration extends Model
         }
 
         return $this->products()->pluck('id')->map(fn ($id) => (string) $id)->unique()->values()->all();
+    }
+
+    /**
+     * IDs de ApiApplications vinculadas à integração.
+     *
+     * @return array<int, int>
+     */
+    private function linkedApiApplicationIds(): array
+    {
+        if ($this->relationLoaded('apiApplications')) {
+            return $this->apiApplications->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+        }
+
+        return $this->apiApplications()->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 
     /**
@@ -79,8 +99,15 @@ class UtmifyIntegration extends Model
     public function appliesToOrder(Order $order): bool
     {
         $linked = $this->linkedProductIdsNormalized();
-        if ($linked === []) {
+        $linkedApps = $this->linkedApiApplicationIds();
+        if ($linked === [] && $linkedApps === []) {
             return true;
+        }
+
+        if ($linkedApps !== [] && $order->api_application_id !== null) {
+            if (in_array((int) $order->api_application_id, $linkedApps, true)) {
+                return true;
+            }
         }
 
         $order->loadMissing('orderItems');
@@ -91,6 +118,10 @@ class UtmifyIntegration extends Model
             ->unique()
             ->values()
             ->all();
+
+        if ($linked === []) {
+            return false;
+        }
 
         return $candidates !== [] && count(array_intersect($linked, $candidates)) > 0;
     }

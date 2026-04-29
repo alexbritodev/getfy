@@ -43,6 +43,35 @@ class ApiCheckoutController extends Controller
             abort(404, 'Aplicação indisponível.');
         }
 
+        // Persist tracking params (UTMs/src/sck) from querystring into metadata.
+        // We only fill missing keys to avoid overwriting integrator-provided values.
+        $meta = is_array($session->metadata) ? $session->metadata : [];
+        $incoming = [];
+        foreach (['utm_source', 'utm_campaign', 'utm_medium', 'utm_content', 'utm_term', 'src', 'sck'] as $k) {
+            $v = $request->query($k);
+            if (! is_string($v)) {
+                continue;
+            }
+            $v = trim($v);
+            if ($v === '') {
+                continue;
+            }
+            $incoming[$k] = mb_substr($v, 0, 255);
+        }
+        if (! empty($incoming)) {
+            $next = $meta;
+            $changed = false;
+            foreach ($incoming as $k => $v) {
+                if (! array_key_exists($k, $next) || trim((string) ($next[$k] ?? '')) === '') {
+                    $next[$k] = $v;
+                    $changed = true;
+                }
+            }
+            if ($changed) {
+                $session->update(['metadata' => $next]);
+            }
+        }
+
         $pg = $app->payment_gateways ?? ApiApplication::defaultPaymentGateways();
         $pg = is_array($pg) ? $pg : ApiApplication::defaultPaymentGateways();
 
@@ -171,6 +200,7 @@ class ApiCheckoutController extends Controller
             'app_name' => $app->name,
             'app_logo_url' => $appLogoUrl,
             'app_sidebar_bg_color' => $app->checkout_sidebar_bg ?? '#18181b',
+            'conversion_pixels' => $app->conversion_pixels ?? [],
             'customer_email' => $customer['email'] ?? null,
             'customer_name' => $customer['name'] ?? null,
             'customer_cpf' => $customer['cpf'] ?? null,
@@ -657,9 +687,11 @@ class ApiCheckoutController extends Controller
         }
 
         $returnUrl = null;
+        $currency = 'BRL';
         if ($order->api_checkout_session_id) {
             $session = ApiCheckoutSession::find($order->api_checkout_session_id);
             $returnUrl = $session?->return_url;
+            $currency = $session?->currency ?: 'BRL';
         }
         if (! is_string($returnUrl) || trim($returnUrl) === '') {
             $returnUrl = $order->apiApplication?->default_return_url;
@@ -671,6 +703,9 @@ class ApiCheckoutController extends Controller
 
         return Inertia::render('ApiCheckout/ThankYou', [
             'order_id' => $order->id,
+            'order_amount' => (float) ($order->amount ?? 0),
+            'order_currency' => strtoupper((string) $currency),
+            'conversion_pixels' => $order->apiApplication?->conversion_pixels ?? [],
             'return_url' => $returnUrl,
             'seconds' => 5,
         ]);

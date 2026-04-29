@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MemberActivityLog;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -12,6 +13,28 @@ use Inertia\Response;
 
 class MemberAreaLoginController extends Controller
 {
+    /**
+     * Best-effort activity log for proof/compliance. Must never block login.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function logMemberActivity(Request $request, Product $product, User $user, string $event, array $metadata = []): void
+    {
+        try {
+            MemberActivityLog::create([
+                'tenant_id' => $product->tenant_id ?? $user->tenant_id,
+                'user_id' => $user->id,
+                'product_id' => $product->id,
+                'event' => $event,
+                'metadata' => $metadata,
+                'ip' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+            ]);
+        } catch (\Throwable) {
+            // ignore (best-effort)
+        }
+    }
+
     public function showLoginForm(Request $request, string $slug): Response|RedirectResponse
     {
         $product = $request->route('product') ?? $request->attributes->get('member_area_product');
@@ -106,6 +129,12 @@ class MemberAreaLoginController extends Controller
         }
         Auth::login($user);
         $request->session()->regenerate();
+
+        $this->logMemberActivity($request, $product, $user, 'member_area.magic_access', [
+            'mode' => 'path',
+            'path' => '/' . ltrim($request->path(), '/'),
+        ]);
+
         return redirect()->intended(route('member-area-app.show', ['slug' => $slug]));
     }
 
@@ -122,6 +151,12 @@ class MemberAreaLoginController extends Controller
         }
         Auth::login($user);
         $request->session()->regenerate();
+
+        $this->logMemberActivity($request, $product, $user, 'member_area.magic_access', [
+            'mode' => 'host',
+            'path' => '/' . ltrim($request->path(), '/'),
+        ]);
+
         return redirect()->to('/');
     }
 }

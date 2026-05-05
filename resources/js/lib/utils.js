@@ -5,6 +5,18 @@ export function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
+export function normalizeAnchorSlug(value) {
+    if (value == null) return '';
+    return String(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 120);
+}
+
 /**
  * Formata valor monetário em formato compacto (K = mil, M = milhão).
  * Ex: 1300 → 1.3K, 10000 → 10K, 1500000 → 1.5M

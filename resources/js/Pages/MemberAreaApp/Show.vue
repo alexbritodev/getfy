@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { nextTick, onMounted, ref } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { ChevronLeft, ChevronRight, Lock, LockOpen } from 'lucide-vue-next';
 import MemberAreaAppLayout from '@/Layouts/MemberAreaAppLayout.vue';
@@ -68,6 +68,21 @@ function productSectionNeedsCheckout(mod) {
 function productSectionUnlocked(mod) {
     return !productSectionNeedsCheckout(mod);
 }
+
+function scrollToHashAnchor() {
+    if (typeof window === 'undefined' || !window.location.hash) return;
+    const anchor = decodeURIComponent(window.location.hash.slice(1));
+    if (!anchor) return;
+
+    nextTick(() => {
+        setTimeout(() => {
+            const target = document.getElementById(anchor);
+            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
+    });
+}
+
+onMounted(scrollToHashAnchor);
 
 </script>
 
@@ -160,7 +175,7 @@ function productSectionUnlocked(mod) {
         </section>
 
         <!-- Módulos por seção (conteúdo conforme tipo: cursos, outros produtos, links externos) -->
-        <section v-for="section in sections" :key="section.id" class="space-y-4">
+        <section v-for="section in sections" :id="section.anchor || null" :key="section.id" class="member-anchor-target space-y-4">
             <div class="flex items-center justify-between gap-2">
                 <h2 class="text-xl font-semibold">{{ section.title }}</h2>
                 <div v-if="carouselHasOverflow[section.id]" class="flex shrink-0 items-center gap-1">
@@ -191,8 +206,9 @@ function productSectionUnlocked(mod) {
                     <template v-for="mod in section.modules" :key="mod.id">
                         <Link
                             v-if="!mod.is_locked"
+                            :id="mod.anchor || null"
                             :href="`/m/${slug}/modulo/${mod.id}`"
-                            class="flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
+                            class="member-anchor-target flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
                         >
                             <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative w-full bg-zinc-700 flex items-center justify-center overflow-hidden']">
                                 <img v-if="mod.thumbnail" :src="mod.thumbnail" :alt="mod.title" class="absolute inset-0 h-full w-full object-cover" />
@@ -204,7 +220,8 @@ function productSectionUnlocked(mod) {
                         </Link>
                         <div
                             v-else
-                            class="flex w-64 shrink-0 cursor-not-allowed flex-col rounded-xl overflow-hidden bg-zinc-800/30 text-left opacity-70"
+                            :id="mod.anchor || null"
+                            class="member-anchor-target flex w-64 shrink-0 cursor-not-allowed flex-col rounded-xl overflow-hidden bg-zinc-800/30 text-left opacity-70"
                         >
                             <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative w-full bg-zinc-700 flex items-center justify-center overflow-hidden']">
                                 <img v-if="mod.thumbnail" :src="mod.thumbnail" :alt="mod.title" class="absolute inset-0 h-full w-full object-cover" />
@@ -222,6 +239,7 @@ function productSectionUnlocked(mod) {
                 <template v-else-if="(section.section_type ?? 'courses') === 'products'">
                     <component
                         v-for="mod in section.modules"
+                        :id="mod.anchor || null"
                         :key="mod.id"
                         :is="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? 'a' : Link"
                         :href="productSectionNeedsCheckout(mod)
@@ -231,7 +249,7 @@ function productSectionUnlocked(mod) {
                                 : (mod.embed ? `${base_url}/modulo/${mod.id}` : `${base_url}/products/${mod.related_product?.id}/open`))"
                         :target="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? '_blank' : undefined"
                         :rel="(productSectionNeedsCheckout(mod) || (mod.related_product?.type === 'link')) ? 'noopener' : undefined"
-                        class="flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
+                        class="member-anchor-target flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
                     >
                         <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative w-full bg-zinc-700 flex items-center justify-center overflow-hidden']">
                             <div
@@ -258,11 +276,12 @@ function productSectionUnlocked(mod) {
                 <template v-else>
                     <a
                         v-for="mod in section.modules"
+                        :id="mod.anchor || null"
                         :key="mod.id"
                         :href="mod.external_url"
                         target="_blank"
                         rel="noopener"
-                        class="flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
+                        class="member-anchor-target flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 text-left transition hover:bg-zinc-800"
                     >
                         <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative w-full bg-zinc-700 flex items-center justify-center overflow-hidden']">
                             <img v-if="mod.thumbnail" :src="mod.thumbnail" :alt="mod.title" class="absolute inset-0 h-full w-full object-cover" />

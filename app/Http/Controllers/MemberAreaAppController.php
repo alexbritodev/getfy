@@ -90,6 +90,7 @@ class MemberAreaAppController extends Controller
             'sections' => $sections->map(fn (MemberSection $s) => [
                 'id' => $s->id,
                 'title' => $s->title,
+                'anchor' => $s->anchor,
                 'cover_mode' => $s->cover_mode ?? 'vertical',
                 'section_type' => $s->section_type ?? 'courses',
                 'modules' => $s->modules->map(fn ($m) => $this->mapModuleForMemberArea($m, $s, $product, $user, $userProductIds, $baseUrl, $accessStartAt, $now))->values()->all(),
@@ -127,6 +128,7 @@ class MemberAreaAppController extends Controller
             'sections' => $sections->map(fn (MemberSection $s) => [
                 'id' => $s->id,
                 'title' => $s->title,
+                'anchor' => $s->anchor,
                 'cover_mode' => $s->cover_mode ?? 'vertical',
                 'modules' => $s->modules->map(function (MemberModule $m) use ($accessStartAt, $now, $user) {
                     $effective = ($m->source_member_module_id)
@@ -136,6 +138,7 @@ class MemberAreaAppController extends Controller
                     return [
                         'id' => $m->id,
                         'title' => $m->title,
+                        'anchor' => $m->anchor,
                         'thumbnail' => $m->thumbnail,
                         'show_title_on_cover' => $m->show_title_on_cover ?? true,
                         ...$this->moduleLockPayload($effective, $accessStartAt, $now),
@@ -238,10 +241,12 @@ class MemberAreaAppController extends Controller
         $sectionsPayload = $sections->map(fn (MemberSection $s) => [
             'id' => $s->id,
             'title' => $s->title,
+            'anchor' => $s->anchor,
             'cover_mode' => $s->cover_mode ?? 'vertical',
             'modules' => $s->modules->map(fn ($m) => [
                 'id' => $m->id,
                 'title' => $m->title,
+                'anchor' => $m->anchor,
                 'thumbnail' => $m->thumbnail,
                 'show_title_on_cover' => $m->show_title_on_cover ?? true,
                 ...$this->moduleLockPayload($m, $accessStartAt, $now),
@@ -1424,6 +1429,7 @@ class MemberAreaAppController extends Controller
             return [
                 'id' => $m->id,
                 'title' => $m->title,
+                'anchor' => $m->anchor,
                 'thumbnail' => $m->thumbnail,
                 'show_title_on_cover' => $m->show_title_on_cover ?? true,
                 ...$this->moduleLockPayload($m, $accessStartAt, $now),
@@ -1458,6 +1464,7 @@ class MemberAreaAppController extends Controller
             return [
                 'id' => $m->id,
                 'title' => $m->title,
+                'anchor' => $m->anchor,
                 'thumbnail' => $m->thumbnail,
                 'show_title_on_cover' => $m->show_title_on_cover ?? true,
                 'related_product_id' => $m->related_product_id,
@@ -1482,6 +1489,7 @@ class MemberAreaAppController extends Controller
         return [
             'id' => $m->id,
             'title' => $m->title,
+            'anchor' => $m->anchor,
             'thumbnail' => $m->thumbnail,
             'show_title_on_cover' => $m->show_title_on_cover ?? true,
             'external_url' => $m->external_url,

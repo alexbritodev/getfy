@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { MessageSquare } from 'lucide-vue-next';
 import { getCommunityPageIconComponent } from '@/utils/communityPageIcons';
 
@@ -18,6 +18,8 @@ const props = defineProps({
     certificate_enabled: { type: Boolean, default: false },
     can_issue_certificate: { type: Boolean, default: false },
 });
+
+const previewScrollRef = ref(null);
 
 const theme = computed(() => props.config?.theme ?? {});
 const hero = computed(() => props.config?.hero ?? {});
@@ -58,6 +60,40 @@ const certOverlayOpacity = computed(() => {
     const raw = certificate.value.background_overlay_opacity ?? 50;
     return (raw <= 1 ? raw * 100 : raw) / 100;
 });
+
+function anchorFromLink(link) {
+    const raw = String(link || '').trim();
+    if (!raw) return '';
+    const hashIndex = raw.indexOf('#');
+    return hashIndex >= 0 ? raw.slice(hashIndex + 1).split(/[?&]/)[0] : '';
+}
+
+function previewItemHref(item) {
+    const link = String(item?.link || '/').trim() || '/';
+    return link.startsWith('#') ? `/${link}` : link;
+}
+
+function findPreviewAnchor(anchor) {
+    const root = previewScrollRef.value;
+    if (!root || !anchor) return null;
+    if (typeof CSS !== 'undefined' && CSS.escape) {
+        return root.querySelector(`#${CSS.escape(anchor)}`);
+    }
+    return root.querySelector(`[id="${anchor.replace(/"/g, '\\"')}"]`);
+}
+
+function handlePreviewMenuClick(event, item) {
+    const anchor = anchorFromLink(item?.link);
+    event.preventDefault();
+    if (!anchor) return;
+
+    const target = findPreviewAnchor(anchor);
+    const container = previewScrollRef.value;
+    if (!target || !container) return;
+
+    const top = target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 72;
+    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
 </script>
 
 <template>
@@ -67,7 +103,7 @@ const certOverlayOpacity = computed(() => {
     >
         <!-- Área: estrutura idêntica à página real; scroll único (hero + conteúdo rolam juntos) -->
         <template v-if="mode === 'area'">
-            <div class="flex h-full min-h-[500px] w-full flex-col overflow-auto">
+            <div ref="previewScrollRef" class="flex h-full min-h-[500px] w-full flex-col overflow-auto scroll-smooth">
                 <!-- Hero + header em overlay -->
                 <div class="relative shrink-0">
                     <section
@@ -116,14 +152,16 @@ const certOverlayOpacity = computed(() => {
                                 {{ productName || 'Área de Membros' }}
                             </span>
                         </span>
-                        <nav class="flex items-center gap-1">
-                            <span
+                        <nav class="pointer-events-auto flex items-center gap-1">
+                            <a
                                 v-for="(item, i) in sidebarItems"
                                 :key="i"
+                                :href="previewItemHref(item)"
                                 class="rounded-lg px-3 py-2 text-sm font-medium text-white/90"
+                                @click="handlePreviewMenuClick($event, item)"
                             >
                                 {{ item.title }}
-                            </span>
+                            </a>
                             <span class="rounded-lg px-3 py-2 text-sm text-white/80">Sair</span>
                         </nav>
                     </header>
@@ -146,13 +184,14 @@ const certOverlayOpacity = computed(() => {
                             </section>
 
                             <!-- Módulos por seção — igual Show.vue, só aparece se houver sections -->
-                            <section v-for="section in sections" :key="section.id" class="space-y-4">
+                            <section v-for="section in sections" :id="section.anchor || null" :key="section.id" class="member-anchor-target space-y-4">
                                 <h2 class="text-xl font-semibold">{{ section.title }}</h2>
                                 <div class="flex gap-4 overflow-x-auto pb-2">
                                     <div
                                         v-for="mod in section.modules"
+                                        :id="mod.anchor || null"
                                         :key="mod.id"
-                                        class="flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 transition hover:bg-zinc-800"
+                                        class="member-anchor-target flex w-64 shrink-0 flex-col rounded-xl overflow-hidden bg-zinc-800/50 transition hover:bg-zinc-800"
                                     >
                                         <div :class="[(section.cover_mode === 'horizontal' ? 'aspect-video' : 'aspect-[2/3]'), 'relative flex w-full items-center justify-center overflow-hidden bg-zinc-700']">
                                             <img v-if="mod.thumbnail" :src="mod.thumbnail" :alt="mod.title" class="absolute inset-0 h-full w-full object-cover" />

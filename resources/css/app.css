@@ -212,4 +212,8 @@
     .lesson-rich-content [data-size='large'] {
         font-size: 1.125em;
     }
+
+    .member-anchor-target {
+        scroll-margin-top: 5rem;
+    }
 }

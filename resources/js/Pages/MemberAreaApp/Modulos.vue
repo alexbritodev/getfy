@@ -16,10 +16,10 @@ const props = defineProps({
     <div class="space-y-8">
         <h1 class="text-2xl font-bold">Módulos</h1>
         <div class="space-y-8">
-            <section v-for="section in sections" :key="section.id" class="space-y-4">
+            <section v-for="section in sections" :id="section.anchor || null" :key="section.id" class="member-anchor-target space-y-4">
                 <h2 class="text-xl font-semibold text-zinc-300">{{ section.title }}</h2>
                 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div v-for="mod in section.modules" :key="mod.id" class="rounded-xl border border-zinc-700 bg-zinc-800/50 overflow-hidden">
+                    <div v-for="mod in section.modules" :id="mod.anchor || null" :key="mod.id" class="member-anchor-target rounded-xl border border-zinc-700 bg-zinc-800/50 overflow-hidden">
                         <Link v-if="!mod.is_locked" :href="`/m/${slug}/modulo/${mod.id}`" class="block">
                             <div class="aspect-video w-full bg-zinc-700 flex items-center justify-center">
                                 <svg class="h-12 w-12 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>

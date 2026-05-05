@@ -1187,100 +1187,104 @@ const typeIcons = {
     link_pagamento: CreditCard,
 };
 
+function buildCartRecoveryPayload() {
+    const cre = form.cart_recovery_email && typeof form.cart_recovery_email === 'object' ? form.cart_recovery_email : {};
+    const creStages = cre?.stages && typeof cre.stages === 'object' ? cre.stages : {};
+
+    return {
+        enabled: !!cre.enabled,
+        stages: {
+            '10m': {
+                subject: String(creStages?.['10m']?.subject ?? ''),
+                body_text: String(creStages?.['10m']?.body_text ?? ''),
+                body_html: '',
+            },
+            '5h': {
+                subject: String(creStages?.['5h']?.subject ?? ''),
+                body_text: String(creStages?.['5h']?.body_text ?? ''),
+                body_html: '',
+            },
+            '24h': {
+                subject: String(creStages?.['24h']?.subject ?? ''),
+                body_text: String(creStages?.['24h']?.body_text ?? ''),
+                body_html: '',
+            },
+        },
+    };
+}
+
+function buildProductPayload() {
+    const companyAddress = form.pagarme_billing?.company_address || {};
+    const payload = {
+        name: form.name,
+        slug: form.slug,
+        description: form.description ?? '',
+        type: form.type,
+        billing_type: form.billing_type,
+        price: form.price,
+        combo_product_ids: Array.isArray(form.combo_product_ids) ? [...form.combo_product_ids] : [],
+        currency: form.currency,
+        is_active: !!form.is_active,
+        conversion_pixels: form.conversion_pixels,
+        cart_recovery_email: buildCartRecoveryPayload(),
+        payment_gateways: form.payment_gateways,
+        card_installments: form.card_installments
+            ? {
+                  enabled: !!form.card_installments.enabled,
+                  max: Math.min(12, Math.max(1, form.card_installments.max || 1)),
+              }
+            : null,
+        stripe_link_enabled: !!form.stripe_link_enabled,
+        email_template: {
+            logo_url: form.email_template?.logo_url || '',
+            from_name: form.email_template?.from_name || '',
+            subject: form.email_template?.subject || '',
+            body_text: form.email_template?.body_text || '',
+            body_html: '',
+        },
+        deliverable_link: form.deliverable_link || '',
+        pagarme_billing: {
+            mode: form.pagarme_billing?.mode || 'customer',
+            company_address: {
+                zipcode: companyAddress.zipcode || '',
+                street: companyAddress.street || '',
+                number: companyAddress.number || '',
+                neighborhood: companyAddress.neighborhood || '',
+                city: companyAddress.city || '',
+                state: String(companyAddress.state || '').slice(0, 2),
+            },
+        },
+    };
+
+    if (form.billing_type === 'subscription') {
+        payload.base_interval = form.base_interval || 'monthly';
+    }
+
+    return payload;
+}
+
 function submit() {
     const baseUrl = `/produtos/${props.produto.id}`;
     const tab = currentTab.value && currentTab.value !== 'geral' ? `?tab=${currentTab.value}` : '';
     const url = baseUrl + tab;
-    if (form.image) {
-        const fd = new FormData();
-        fd.append('name', form.name);
-        fd.append('slug', form.slug);
-        fd.append('description', form.description);
-        fd.append('type', form.type);
-        fd.append('billing_type', form.billing_type);
-        fd.append('price', form.price);
-        (form.combo_product_ids || []).forEach((id) => fd.append('combo_product_ids[]', id));
-        if (form.billing_type === 'subscription') {
-            fd.append('base_interval', form.base_interval || 'monthly');
-        }
-        fd.append('currency', form.currency);
-        fd.append('is_active', form.is_active ? '1' : '0');
-        fd.append('conversion_pixels', JSON.stringify(form.conversion_pixels));
-        // Envia texto simples; o backend monta o HTML bonito automaticamente.
-        const cre = form.cart_recovery_email && typeof form.cart_recovery_email === 'object' ? form.cart_recovery_email : {};
-        const creStages = cre?.stages && typeof cre.stages === 'object' ? cre.stages : {};
-        const crePayload = {
-            enabled: !!cre.enabled,
-            stages: {
-                '10m': {
-                    subject: String(creStages?.['10m']?.subject ?? ''),
-                    body_text: String(creStages?.['10m']?.body_text ?? ''),
-                    body_html: '',
-                },
-                '5h': {
-                    subject: String(creStages?.['5h']?.subject ?? ''),
-                    body_text: String(creStages?.['5h']?.body_text ?? ''),
-                    body_html: '',
-                },
-                '24h': {
-                    subject: String(creStages?.['24h']?.subject ?? ''),
-                    body_text: String(creStages?.['24h']?.body_text ?? ''),
-                    body_html: '',
-                },
+    const payload = buildProductPayload();
+
+    if (form.image instanceof File) {
+        form.transform(() => ({
+            ...payload,
+            _method: 'PUT',
+            image: form.image,
+        })).post(url, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                form.image = null;
             },
-        };
-        fd.append('cart_recovery_email', JSON.stringify(crePayload));
-        if (form.payment_gateways) {
-            fd.append('payment_gateways[pix]', form.payment_gateways.pix || '');
-            (form.payment_gateways.pix_redundancy || []).forEach((s) => fd.append('payment_gateways[pix_redundancy][]', s));
-            fd.append('payment_gateways[card]', form.payment_gateways.card || '');
-            (form.payment_gateways.card_redundancy || []).forEach((s) => fd.append('payment_gateways[card_redundancy][]', s));
-            fd.append('payment_gateways[boleto]', form.payment_gateways.boleto || '');
-            (form.payment_gateways.boleto_redundancy || []).forEach((s) => fd.append('payment_gateways[boleto_redundancy][]', s));
-            fd.append('payment_gateways[crypto]', form.payment_gateways.crypto || '');
-            (form.payment_gateways.crypto_redundancy || []).forEach((s) => fd.append('payment_gateways[crypto_redundancy][]', s));
-            if (form.billing_type === 'subscription') {
-                fd.append('payment_gateways[pix_auto]', form.payment_gateways.pix_auto || '');
-                (form.payment_gateways.pix_auto_redundancy || []).forEach((s) => fd.append('payment_gateways[pix_auto_redundancy][]', s));
-            }
-        }
-        if (form.card_installments) {
-            fd.append('card_installments[enabled]', form.card_installments.enabled ? '1' : '0');
-            fd.append('card_installments[max]', String(Math.min(12, Math.max(1, form.card_installments.max || 1))));
-        }
-        if (typeof form.stripe_link_enabled === 'boolean') {
-            fd.append('stripe_link_enabled', form.stripe_link_enabled ? '1' : '0');
-        }
-        if (form.email_template) {
-            fd.append('email_template[logo_url]', form.email_template.logo_url || '');
-            fd.append('email_template[from_name]', form.email_template.from_name || '');
-            fd.append('email_template[subject]', form.email_template.subject || '');
-            fd.append('email_template[body_text]', form.email_template.body_text || '');
-            // Mantém compatibilidade mas evita o usuário ter que digitar HTML.
-            fd.append('email_template[body_html]', '');
-        }
-        fd.append('deliverable_link', form.deliverable_link || '');
-        if (form.pagarme_billing) {
-            fd.append('pagarme_billing[mode]', form.pagarme_billing.mode || 'customer');
-            const ca = form.pagarme_billing.company_address || {};
-            fd.append('pagarme_billing[company_address][zipcode]', ca.zipcode || '');
-            fd.append('pagarme_billing[company_address][street]', ca.street || '');
-            fd.append('pagarme_billing[company_address][number]', ca.number || '');
-            fd.append('pagarme_billing[company_address][neighborhood]', ca.neighborhood || '');
-            fd.append('pagarme_billing[company_address][city]', ca.city || '');
-            fd.append('pagarme_billing[company_address][state]', String(ca.state || '').slice(0, 2));
-        }
-        fd.append('_method', 'PUT');
-        fd.append('image', form.image);
-        form.transform(() => fd).post(url, { forceFormData: true });
-    } else {
-        form.transform((data) => {
-            if (data.billing_type === 'subscription') {
-                data.base_interval = data.base_interval || 'monthly';
-            }
-            return data;
-        }).put(url);
+        });
+        return;
     }
+
+    form.transform(() => payload).put(url, { preserveScroll: true });
 }
 </script>
 

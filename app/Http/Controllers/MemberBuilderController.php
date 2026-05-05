@@ -168,6 +168,7 @@ class MemberBuilderController extends Controller
             'sections' => $produto->memberSections->map(fn (MemberSection $s) => [
                 'id' => $s->id,
                 'title' => $s->title,
+                'anchor' => $s->anchor,
                 'position' => $s->position,
                 'cover_mode' => $s->cover_mode ?? 'vertical',
                 'section_type' => $s->section_type ?? 'courses',
@@ -175,6 +176,7 @@ class MemberBuilderController extends Controller
                     $base = [
                         'id' => $m->id,
                         'title' => $m->title,
+                        'anchor' => $m->anchor,
                         'position' => $m->position,
                         'thumbnail' => $m->thumbnail,
                         'show_title_on_cover' => $m->show_title_on_cover ?? true,
@@ -499,12 +501,64 @@ class MemberBuilderController extends Controller
         return response()->json(['url' => $storage->url($path), 'path' => $path]);
     }
 
+    private function normalizeAnchor(?string $value): ?string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+
+        $slug = \Illuminate\Support\Str::slug($raw, '-');
+        $slug = preg_replace('/[^a-z0-9-]+/', '', strtolower($slug)) ?? '';
+        $slug = trim(preg_replace('/-+/', '-', $slug) ?? '', '-');
+
+        return $slug !== '' ? substr($slug, 0, 120) : null;
+    }
+
+    private function resolveUniqueAnchor(Product $produto, ?string $value, ?string $currentType = null, ?int $currentId = null): ?string
+    {
+        $base = $this->normalizeAnchor($value);
+        if ($base === null) {
+            return null;
+        }
+
+        $candidate = $base;
+        $suffix = 2;
+        while ($this->anchorExists($produto, $candidate, $currentType, $currentId)) {
+            $tail = '-' . $suffix;
+            $candidate = substr($base, 0, 120 - strlen($tail)) . $tail;
+            $suffix++;
+        }
+
+        return $candidate;
+    }
+
+    private function anchorExists(Product $produto, string $anchor, ?string $currentType = null, ?int $currentId = null): bool
+    {
+        $sectionExists = MemberSection::query()
+            ->where('product_id', $produto->id)
+            ->where('anchor', $anchor)
+            ->when($currentType === 'section' && $currentId !== null, fn ($query) => $query->where('id', '!=', $currentId))
+            ->exists();
+
+        if ($sectionExists) {
+            return true;
+        }
+
+        return MemberModule::query()
+            ->where('product_id', $produto->id)
+            ->where('anchor', $anchor)
+            ->when($currentType === 'module' && $currentId !== null, fn ($query) => $query->where('id', '!=', $currentId))
+            ->exists();
+    }
+
     // Sections
     public function storeSection(Request $request, Product $produto): JsonResponse|RedirectResponse
     {
         $this->authorizeProduct($produto);
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
+            'anchor' => ['nullable', 'string', 'max:120'],
             'cover_mode' => ['nullable', 'string', 'in:vertical,horizontal'],
             'section_type' => ['nullable', 'string', 'in:courses,products,external_links'],
         ]);
@@ -512,6 +566,7 @@ class MemberBuilderController extends Controller
         MemberSection::create([
             'product_id' => $produto->id,
             'title' => $validated['title'],
+            'anchor' => $this->resolveUniqueAnchor($produto, $validated['anchor'] ?? null),
             'position' => $max + 1,
             'cover_mode' => $validated['cover_mode'] ?? 'vertical',
             'section_type' => $validated['section_type'] ?? 'courses',
@@ -530,10 +585,14 @@ class MemberBuilderController extends Controller
         }
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:255'],
+            'anchor' => ['nullable', 'string', 'max:120'],
             'position' => ['sometimes', 'integer', 'min:0'],
             'cover_mode' => ['sometimes', 'string', 'in:vertical,horizontal'],
             'section_type' => ['sometimes', 'string', 'in:courses,products,external_links'],
         ]);
+        if (array_key_exists('anchor', $validated)) {
+            $validated['anchor'] = $this->resolveUniqueAnchor($produto, $validated['anchor'], 'section', $section->id);
+        }
         $section->update($validated);
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Seção atualizada.']);
@@ -567,6 +626,7 @@ class MemberBuilderController extends Controller
         if ($sectionType === 'courses') {
             $validated = $request->validate([
                 'title' => ['required', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'show_title_on_cover' => ['nullable', 'boolean'],
                 'release_after_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
                 'release_at_date' => ['nullable', 'date_format:Y-m-d'],
@@ -584,6 +644,7 @@ class MemberBuilderController extends Controller
                 'member_section_id' => $section->id,
                 'product_id' => $produto->id,
                 'title' => $validated['title'],
+                'anchor' => $this->resolveUniqueAnchor($produto, $validated['anchor'] ?? null),
                 'position' => $max + 1,
                 'show_title_on_cover' => $validated['show_title_on_cover'] ?? true,
                 'release_after_days' => $validated['release_after_days'] ?? null,
@@ -592,6 +653,7 @@ class MemberBuilderController extends Controller
         } elseif ($sectionType === 'products') {
             $validated = $request->validate([
                 'title' => ['required', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'related_product_id' => ['required', 'exists:products,id'],
                 'access_type' => ['required', 'string', 'in:paid,free'],
                 'thumbnail' => ['nullable', 'string', 'max:500'],
@@ -633,6 +695,7 @@ class MemberBuilderController extends Controller
                             'member_section_id' => $section->id,
                             'product_id' => $produto->id,
                             'title' => $sourceMod->title !== '' ? $sourceMod->title : $validated['title'],
+                            'anchor' => $this->resolveUniqueAnchor($produto, $validated['anchor'] ?? null),
                             'position' => $position,
                             'related_product_id' => $validated['related_product_id'],
                             'source_member_module_id' => $sourceMod->id,
@@ -659,6 +722,7 @@ class MemberBuilderController extends Controller
                     'member_section_id' => $section->id,
                     'product_id' => $produto->id,
                     'title' => $validated['title'],
+                    'anchor' => $this->resolveUniqueAnchor($produto, $validated['anchor'] ?? null),
                     'position' => $max + 1,
                     'related_product_id' => $validated['related_product_id'],
                     'access_type' => $validated['access_type'],
@@ -671,6 +735,7 @@ class MemberBuilderController extends Controller
             // external_links
             $validated = $request->validate([
                 'title' => ['required', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'external_url' => ['required', 'url', 'max:500'],
                 'thumbnail' => ['nullable', 'string', 'max:500'],
                 'show_title_on_cover' => ['nullable', 'boolean'],
@@ -680,6 +745,7 @@ class MemberBuilderController extends Controller
                 'member_section_id' => $section->id,
                 'product_id' => $produto->id,
                 'title' => $validated['title'],
+                'anchor' => $this->resolveUniqueAnchor($produto, $validated['anchor'] ?? null),
                 'position' => $max + 1,
                 'external_url' => $validated['external_url'],
                 'thumbnail' => $validated['thumbnail'] ?? null,
@@ -712,6 +778,7 @@ class MemberBuilderController extends Controller
         $payload = [
             'id' => $module->id,
             'title' => $module->title,
+            'anchor' => $module->anchor,
             'position' => $module->position,
             'thumbnail' => $module->thumbnail,
             'show_title_on_cover' => $module->show_title_on_cover ?? true,
@@ -759,6 +826,7 @@ class MemberBuilderController extends Controller
         if ($sectionType === 'courses') {
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'position' => ['sometimes', 'integer', 'min:0'],
                 'thumbnail' => ['nullable', 'string', 'max:500'],
                 'show_title_on_cover' => ['sometimes', 'boolean'],
@@ -782,6 +850,7 @@ class MemberBuilderController extends Controller
         } elseif ($sectionType === 'products') {
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'position' => ['sometimes', 'integer', 'min:0'],
                 'related_product_id' => ['sometimes', 'exists:products,id'],
                 'access_type' => ['sometimes', 'string', 'in:paid,free'],
@@ -803,11 +872,15 @@ class MemberBuilderController extends Controller
         } else {
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
+                'anchor' => ['nullable', 'string', 'max:120'],
                 'position' => ['sometimes', 'integer', 'min:0'],
                 'external_url' => ['sometimes', 'url', 'max:500'],
                 'thumbnail' => ['nullable', 'string', 'max:500'],
                 'show_title_on_cover' => ['sometimes', 'boolean'],
             ]);
+        }
+        if (array_key_exists('anchor', $validated)) {
+            $validated['anchor'] = $this->resolveUniqueAnchor($produto, $validated['anchor'], 'module', $module->id);
         }
         $module->update($validated);
         if ($request->expectsJson()) {

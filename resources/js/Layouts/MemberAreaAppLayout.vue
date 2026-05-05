@@ -73,6 +73,42 @@ function closeMobileMenu() {
     mobileMenuOpen.value = false;
 }
 
+function internalMenuHref(item) {
+    const link = String(item?.link || '/').trim() || '/';
+    return link.startsWith('/') ? basePath.value + link : basePath.value + '/' + link;
+}
+
+function samePageAnchorTarget(href) {
+    if (typeof window === 'undefined' || !href) return null;
+    const url = new URL(href, window.location.origin);
+    if (!url.hash) return null;
+
+    const normalizePath = (path) => String(path || '/').replace(/\/+$/, '') || '/';
+    return normalizePath(url.pathname) === normalizePath(window.location.pathname)
+        ? decodeURIComponent(url.hash.slice(1))
+        : null;
+}
+
+function scrollToAnchor(anchor) {
+    if (!anchor) return;
+    const target = document.getElementById(anchor);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function handleInternalMenuClick(event, item) {
+    const href = internalMenuHref(item);
+    const anchor = samePageAnchorTarget(href);
+    if (!anchor) {
+        closeMobileMenu();
+        return;
+    }
+
+    event.preventDefault();
+    window.history.pushState({}, '', href);
+    closeMobileMenu();
+    setTimeout(() => scrollToAnchor(anchor), 0);
+}
+
 function onWindowScroll() {
     headerScrolled.value = typeof window !== 'undefined' && window.scrollY > 8;
 }
@@ -505,8 +541,9 @@ watch(
                         </a>
                         <Link
                             v-else
-                            :href="item.link.startsWith('/') ? basePath + item.link : basePath + '/' + item.link"
+                            :href="internalMenuHref(item)"
                             class="rounded-lg px-3 py-2 text-sm font-medium text-white/90 drop-shadow hover:bg-white/10"
+                            @click="handleInternalMenuClick($event, item)"
                         >
                             {{ item.title }}
                         </Link>
@@ -711,9 +748,9 @@ watch(
                             </a>
                             <Link
                                 v-else
-                                :href="item.link.startsWith('/') ? basePath + item.link : basePath + '/' + item.link"
+                                :href="internalMenuHref(item)"
                                 class="rounded-lg px-4 py-3 text-sm font-medium text-zinc-200 hover:bg-zinc-800 hover:text-white"
-                                @click="closeMobileMenu"
+                                @click="handleInternalMenuClick($event, item)"
                             >
                                 {{ item.title }}
                             </Link>

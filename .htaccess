@@ -2,6 +2,11 @@
     RewriteEngine On
     RewriteBase /
 
+    # Segurança: Bloquear listagem e arquivos sensíveis
+    Options -Indexes
+    RewriteRule (^|/)\.(?!well-known) - [F]
+    RewriteRule ^(composer\.|package(-lock)?\.json|artisan|Dockerfile|docker-compose|phpunit\.xml|README\.md|CONTRIBUTING\.md|SECURITY\.md|VERSION) - [F]
+
     # Raiz (/) – redireciona diretamente para /login (evita 404)
     RewriteRule ^/?$ /login [R=302,L]
 

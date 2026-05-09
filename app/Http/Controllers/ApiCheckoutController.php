@@ -633,7 +633,6 @@ class ApiCheckoutController extends Controller
             $card = [
                 'payment_token' => $validated['payment_token'],
                 'card_mask' => $validated['card_mask'] ?? null,
-                'return_url' => route('api-checkout.thank-you', ['order_id' => $order->id]),
             ];
             try {
                 event(new OrderPending($order));

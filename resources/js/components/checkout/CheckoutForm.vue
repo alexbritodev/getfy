@@ -7,7 +7,6 @@ import CheckoutDropdown from './CheckoutDropdown.vue';
 import CheckoutOrderBumps from './CheckoutOrderBumps.vue';
 import CheckoutPaymentMethods from './CheckoutPaymentMethods.vue';
 import AsaasCard from './gateways/asaas/Card.vue';
-import CajuPaySdkMount from './CajuPaySdkMount.vue';
 import {
     CHECKOUT_PAGARME_TOKENIZE_FORM_ID,
     PAGARME_TOKENIZE_FORM_ACTION,
@@ -175,7 +174,6 @@ const boletoGatewaySlug = computed(() => {
     return (boletoMethod?.gateway_slug || '').toLowerCase();
 });
 const isBoletoGatewayPagarme = computed(() => boletoGatewaySlug.value === 'pagarme');
-
 const cardPagarmePublicKey = computed(() => {
     const k = props.cardGatewayKeys?.pagarme;
     return (k && typeof k.public_key === 'string' ? k.public_key : '').trim();
@@ -736,241 +734,6 @@ const cardApproved = ref(false);
 const cardApprovedRedirectUrl = ref('');
 const showCardRefusedModal = ref(false);
 const cardRefusedMessage = ref('');
-
-/** Slug do gateway do método atualmente selecionado em form.payment_method. */
-const currentMethodGatewaySlug = computed(() => {
-    const methods = Array.isArray(props.availablePaymentMethods) ? props.availablePaymentMethods : [];
-    const m = methods.find((x) => x.id === form.payment_method);
-    return (m?.gateway_slug || '').toLowerCase();
-});
-
-/** Fluxo CajuPay SDK: cartão / boleto / Apple Pay / Google Pay rodando pelo embedded SDK. */
-const isCajuPaySdkFlow = computed(() => {
-    return ['card', 'boleto', 'apple_pay', 'google_pay'].includes(form.payment_method)
-        && currentMethodGatewaySlug.value === 'cajupay';
-});
-
-const cajupaySessionToken = ref('');
-const cajupayPollingToken = ref('');
-const cajupayMountRef = ref(null);
-const cajupayError = ref('');
-const cajupayPolling = ref(false);
-const cajupaySessionLoading = ref(false);
-const cajupayMissingFieldsHint = ref('');
-let cajupayPollTimer = null;
-let cajupaySessionDebounce = null;
-const cajupayApprovedRedirectUrl = ref('');
-// Lista de métodos efetivamente liberados pra essa sessão (interseção das flags allow_*
-// com o que a conta CajuPay tem ativo no PSP). Vem da própria CajuPay via
-// GET /api/sdk/public/checkout/sessions/{token}. Usada para mostrar mensagem amigável
-// quando o cliente seleciona um método que não está disponível (ex.: Google Pay sem
-// liberação na conta) — em vez de o SDK responder method_not_available depois.
-const cajupayMethodsAvailable = ref([]);
-
-function stopCajuPayPolling() {
-    if (cajupayPollTimer) {
-        clearTimeout(cajupayPollTimer);
-        cajupayPollTimer = null;
-    }
-    cajupayPolling.value = false;
-}
-
-/**
- * Payload da CRIAÇÃO da sessão CajuPay (draft, sem dados do cliente). A validação dos dados
- * do cliente acontece só no clique do "Pagar", em validateCajuPayCustomerFields().
- */
-function buildCajuPaySessionPayload() {
-    const payload = {
-        product_id: form.product_id,
-        payment_method: form.payment_method,
-        coupon_code: (form.coupon_code || '').trim() || null,
-    };
-    if (props.productOfferId) payload.product_offer_id = props.productOfferId;
-    if (props.subscriptionPlanId) payload.subscription_plan_id = props.subscriptionPlanId;
-    if (props.checkoutSessionToken) payload.checkout_session_token = props.checkoutSessionToken;
-    if (props.displayCurrency) payload.display_currency = props.displayCurrency;
-    if (Array.isArray(props.orderBumpIds) && props.orderBumpIds.length > 0) {
-        payload.order_bump_ids = props.orderBumpIds
-            .map((id) => (typeof id === 'number' ? id : parseInt(id, 10)))
-            .filter((n) => !Number.isNaN(n));
-    }
-    appendUtms(payload);
-    return payload;
-}
-
-/**
- * O widget CajuPay agora pode montar SEM nenhum campo do cliente preenchido. A validação
- * dos dados (per customer_fields) acontece em validateCajuPayCustomerFields() antes de
- * disparar o pagamento. Mantemos a função para compatibilidade da chamada existente.
- */
-function cajupayMinimumFieldsReady() {
-    cajupayMissingFieldsHint.value = '';
-    return true;
-}
-
-/**
- * Validação dos campos do cliente exigidos pelo checkout (config-aware) ANTES de confirmar o
- * pagamento via SDK. Marca form.errors.* para que as mensagens apareçam embaixo dos inputs.
- * Retorna true se passou.
- */
-function validateCajuPayCustomerFields() {
-    const errors = {};
-    const email = (form.email || '').trim();
-    if (email.length < 5 || !/.+@.+\..+/.test(email)) {
-        errors.email = 'E-mail obrigatório.';
-    }
-    if (showName.value && (form.name || '').trim().length < 2) {
-        errors.name = 'Informe seu nome completo.';
-    }
-    if (showCpf.value && (form.cpf || '').replace(/\D/g, '').length !== 11) {
-        errors.cpf = 'CPF inválido.';
-    }
-    if (showPhone.value && (phoneDigits.value || '').length < 8) {
-        errors.phone = 'Telefone inválido.';
-    }
-    if (Object.keys(errors).length > 0) {
-        Object.entries(errors).forEach(([k, v]) => form.setError(k, v));
-        showEditForm.value = true;
-        return false;
-    }
-    form.clearErrors('email', 'name', 'cpf', 'phone');
-    return true;
-}
-
-async function ensureCajuPaySession({ silent = false } = {}) {
-    if (!isCajuPaySdkFlow.value) return null;
-    if (cajupaySessionToken.value) return cajupaySessionToken.value;
-    if (cajupaySessionLoading.value) return null;
-    if (!cajupayMinimumFieldsReady()) return null;
-
-    cajupaySessionLoading.value = true;
-    if (!silent) cajupayError.value = '';
-    try {
-        const res = await axios.post('/checkout/cajupay/session', buildCajuPaySessionPayload(), {
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-XSRF-TOKEN': getCsrfToken(),
-            },
-            withCredentials: true,
-        });
-        const data = res?.data || {};
-        if (!data.success || !data.token) {
-            cajupayError.value = data?.message || 'Não foi possível iniciar o pagamento na CajuPay.';
-            return null;
-        }
-        cajupaySessionToken.value = data.token;
-        cajupayPollingToken.value = data.polling_token || '';
-        cajupayMethodsAvailable.value = Array.isArray(data.methods_available) ? data.methods_available : [];
-
-        // Se a CajuPay listou methods_available e o método pedido NÃO está nela, o SDK
-        // vai falhar com method_not_available no confirm. Mostra mensagem amigável aqui
-        // pra o cliente trocar de método sem ver o erro críptico.
-        if (
-            cajupayMethodsAvailable.value.length > 0 &&
-            data.method_supported === false
-        ) {
-            const methodLabel = form.payment_method === 'apple_pay' ? 'Apple Pay'
-                : form.payment_method === 'google_pay' ? 'Google Pay'
-                : form.payment_method === 'boleto' ? 'Boleto'
-                : 'Esse método de pagamento';
-            cajupayError.value = `${methodLabel} não está disponível para esta conta CajuPay no momento. Selecione outra forma de pagamento (ex.: Cartão).`;
-        }
-
-        return data.token;
-    } catch (e) {
-        const msg = e?.response?.data?.message || e?.message || 'Falha ao iniciar pagamento.';
-        cajupayError.value = msg;
-        return null;
-    } finally {
-        cajupaySessionLoading.value = false;
-    }
-}
-
-function scheduleEnsureCajuPaySession() {
-    if (cajupaySessionDebounce) clearTimeout(cajupaySessionDebounce);
-    cajupaySessionDebounce = setTimeout(() => {
-        ensureCajuPaySession({ silent: true });
-    }, 500);
-}
-
-async function pollCajuPayOrderStatus() {
-    if (!cajupayPollingToken.value) return;
-    try {
-        const res = await axios.get('/checkout/order-status', {
-            params: { token: cajupayPollingToken.value },
-            headers: { 'Accept': 'application/json' },
-            withCredentials: true,
-        });
-        const data = res?.data || {};
-        if (data.status === 'completed' && data.redirect_url) {
-            stopCajuPayPolling();
-            cardApproved.value = true;
-            cajupayApprovedRedirectUrl.value = data.redirect_url;
-            setTimeout(() => router.visit(data.redirect_url), 1200);
-            return;
-        }
-        if (['rejected', 'cancelled', 'failed'].includes(data.status)) {
-            stopCajuPayPolling();
-            cajupayError.value = 'Pagamento recusado. Tente novamente ou use outro método.';
-            return;
-        }
-    } catch (_) {
-        /* segue tentando */
-    }
-    cajupayPollTimer = setTimeout(pollCajuPayOrderStatus, 3000);
-}
-
-function startCajuPayPolling(token) {
-    if (!token) return;
-    cajupayPollingToken.value = token;
-    cajupayPolling.value = true;
-    stopCajuPayPolling();
-    cajupayPolling.value = true;
-    cajupayPollTimer = setTimeout(pollCajuPayOrderStatus, 2500);
-}
-
-onBeforeUnmount(() => stopCajuPayPolling());
-
-watch(() => form.payment_method, () => {
-    cajupayError.value = '';
-    // Mudou de método: invalida a sessão CajuPay para forçar criação de uma nova
-    // (cada sessão é específica para um método).
-    if (cajupaySessionToken.value) {
-        cajupaySessionToken.value = '';
-        cajupayPollingToken.value = '';
-        cajupayMethodsAvailable.value = [];
-        stopCajuPayPolling();
-    }
-    // Se o novo método é um fluxo CajuPay SDK, agenda criação automática da sessão
-    // assim o widget já monta com os inputs (cartão / boleto / wallet) sem o usuário
-    // precisar clicar em "Pagar" primeiro.
-    if (isCajuPaySdkFlow.value) {
-        // Cria o draft (sessão sem Order) imediatamente — sem exigir email/nome/CPF.
-        scheduleEnsureCajuPaySession();
-    } else {
-        cajupayMissingFieldsHint.value = '';
-    }
-});
-
-// Recria o draft se o valor do pedido mudar (cupom aplicado/removido, bumps, oferta/plano).
-// Isso evita cobrar valor desatualizado quando o cliente seleciona o método e depois muda
-// o cupom/bumps. A sessão antiga fica órfã na CajuPay (sem efeito — só o token novo é usado).
-watch(
-    () => [form.coupon_code, props.orderBumpIds, props.productOfferId, props.subscriptionPlanId],
-    () => {
-        if (!isCajuPaySdkFlow.value) return;
-        if (cajupaySessionToken.value) {
-            cajupaySessionToken.value = '';
-            cajupayPollingToken.value = '';
-            cajupayMethodsAvailable.value = [];
-            stopCajuPayPolling();
-        }
-        scheduleEnsureCajuPaySession();
-    },
-    { deep: true }
-);
-
 const cardNumberInput = ref(null);
 const cardExpMonthInput = ref(null);
 const cardExpYearInput = ref(null);
@@ -1517,100 +1280,6 @@ async function getEfiPaymentToken() {
     throw new Error('Não foi possível gerar o token do cartão.');
 }
 
-async function submitCajuPaySdkFlow(paymentMethod) {
-    cajupayError.value = '';
-    cardFormError.value = '';
-
-    // Antes de confirmar, exige os campos do cliente conforme customer_fields. Os erros
-    // aparecem embaixo dos inputs (form.errors.*) e o resumo é reaberto se estiver colapsado.
-    if (!validateCajuPayCustomerFields()) {
-        cajupayError.value = 'Preencha os dados do cliente acima antes de finalizar o pagamento.';
-        return;
-    }
-
-    cardTokenizing.value = true;
-    try {
-        // Garante que o draft (sessão sem Order) esteja criado. Se o usuário trocou de
-        // método ou se ainda não havia draft, cria agora.
-        let token = cajupaySessionToken.value;
-        let pollingToken = cajupayPollingToken.value;
-        if (!token) {
-            await ensureCajuPaySession();
-            token = cajupaySessionToken.value;
-            pollingToken = cajupayPollingToken.value;
-            if (!token) {
-                throw new Error(cajupayError.value || 'Não foi possível iniciar o pagamento na CajuPay.');
-            }
-            await nextTick();
-            const start = Date.now();
-            while (!cajupayMountRef.value?.isReady?.() && Date.now() - start < 8000) {
-                await new Promise((r) => setTimeout(r, 150));
-            }
-        }
-
-        if (!cajupayMountRef.value?.isReady?.()) {
-            throw new Error('Aguarde o checkout CajuPay terminar de carregar e tente novamente.');
-        }
-
-        // Materializa a Order (User + Order pendente) com os dados do cliente. A Order
-        // só passa a existir aqui — antes existia apenas a sessão na CajuPay.
-        const orderPayload = {
-            polling_token: pollingToken,
-            email: form.email,
-            name: showName.value ? form.name : '',
-            cpf: showCpf.value ? (form.cpf || '').replace(/\D/g, '') : '',
-            phone: showPhone.value ? form.country_code + phoneDigits.value : '',
-        };
-        appendUtms(orderPayload);
-
-        try {
-            const orderRes = await axios.post('/checkout/cajupay/confirm-order', orderPayload, {
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-XSRF-TOKEN': getCsrfToken(),
-                },
-                withCredentials: true,
-            });
-            const orderData = orderRes?.data || {};
-            if (!orderData.success) {
-                throw new Error(orderData?.message || 'Não foi possível registrar o pedido.');
-            }
-        } catch (e) {
-            // 422 com errors.*: marca os erros embaixo dos inputs e aborta.
-            const fieldErrors = e?.response?.data?.errors;
-            if (fieldErrors && typeof fieldErrors === 'object') {
-                Object.entries(fieldErrors).forEach(([k, v]) => form.setError(k, Array.isArray(v) ? v[0] : v));
-                showEditForm.value = true;
-                throw new Error(e?.response?.data?.message || 'Dados do cliente incompletos.');
-            }
-            throw e;
-        }
-
-        // Sincroniza o pagador com os dados frescos do form ANTES do confirm. Indicação
-        // oficial da CajuPay: o /confirm lê payer_name / payer_email / payer_document do
-        // payload do POST público (SDK mandou); o initial_payer da sessão server-side é
-        // só pré-preenchimento opcional. Funciona pra TODOS os métodos sem destruir o
-        // iframe do cartão (vs. remount, que perderia PAN/CVC).
-        cajupayMountRef.value?.setPayer?.({
-            name: form.name,
-            email: form.email,
-            document: (form.cpf || '').replace(/\D/g, ''),
-        });
-
-        await cajupayMountRef.value.confirm();
-        startCajuPayPolling(pollingToken);
-    } catch (e) {
-        const msg = e?.response?.data?.message || e?.message || 'Falha ao processar pagamento.';
-        cajupayError.value = msg;
-        cardFormError.value = msg;
-        showCardRefusedModal.value = true;
-        cardRefusedMessage.value = msg;
-    } finally {
-        cardTokenizing.value = false;
-    }
-}
-
 function submit() {
     const methods = Array.isArray(props.availablePaymentMethods) ? props.availablePaymentMethods : [];
     if (methods.length === 0) {
@@ -1623,11 +1292,6 @@ function submit() {
         return;
     }
     form.clearErrors('payment_method');
-
-    if (isCajuPaySdkFlow.value) {
-        submitCajuPaySdkFlow(paymentMethod);
-        return;
-    }
 
     if (paymentMethod === 'card') {
         cardFormError.value = '';
@@ -2277,71 +1941,9 @@ function submit() {
             />
             <p v-if="form.errors.payment_method" class="text-sm font-medium text-red-600">{{ form.errors.payment_method }}</p>
 
-            <!-- CajuPay SDK (Cartão / Boleto / Apple Pay / Google Pay) -->
-            <!-- Mesmo padrão visual do painel do Stripe: outer com border-2/bg-gray-50/50, header
-                 com ícone + título e o widget do SDK dentro de um box branco arredondado. -->
-            <div
-                v-if="isCajuPaySdkFlow"
-                class="space-y-4 rounded-xl border-2 border-gray-100 bg-gray-50/50 p-4"
-                data-checkout="form-cajupay-panel"
-            >
-                <div class="flex items-center gap-2 text-gray-700">
-                    <span class="flex h-8 w-8 shrink-0 items-center justify-center">
-                        <CreditCard v-if="form.payment_method === 'card'" class="h-5 w-5 text-gray-500" />
-                        <FileText v-else-if="form.payment_method === 'boleto'" class="h-5 w-5 text-gray-500" />
-                        <Shield v-else class="h-5 w-5 text-gray-500" />
-                    </span>
-                    <span class="text-sm font-medium">
-                        {{
-                            form.payment_method === 'card'
-                                ? (t('checkout.dados_cartao') || 'Dados do cartão')
-                                : form.payment_method === 'boleto'
-                                  ? 'Boleto bancário'
-                                  : form.payment_method === 'apple_pay'
-                                    ? 'Apple Pay'
-                                    : 'Google Pay'
-                        }}
-                    </span>
-                </div>
-                <p v-if="cajupayError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
-                    {{ cajupayError }}
-                </p>
-                <div class="rounded-xl border-2 border-gray-100 bg-white px-4 py-3">
-                    <!--
-                        initial-payer aqui é só o pré-preenchimento do widget no MOUNT.
-                        Os dados que vão pro /confirm da CajuPay vêm do controller.setPayer()
-                        chamado em submitCajuPaySdkFlow() — assim o cliente pode preencher
-                        nome/email/CPF DEPOIS de o widget estar montado e tudo funciona.
-                        Não mandamos `phone` porque o SDK ignora (não vai no /confirm).
-                    -->
-                    <CajuPaySdkMount
-                        ref="cajupayMountRef"
-                        :payment-method="form.payment_method"
-                        :session-token="cajupaySessionToken"
-                        :initial-payer="{ name: form.name, email: form.email, document: (form.cpf || '').replace(/\D/g, '') }"
-                        container-id="cajupay-method"
-                    />
-                    <div
-                        v-if="!cajupaySessionToken && (cajupaySessionLoading || cajupayMissingFieldsHint)"
-                        class="flex items-center gap-2 text-sm text-gray-600"
-                    >
-                        <Loader2 v-if="cajupaySessionLoading" class="h-4 w-4 shrink-0 animate-spin text-gray-500" />
-                        <AlertCircle v-else class="h-4 w-4 shrink-0 text-gray-500" />
-                        <span>
-                            {{
-                                cajupaySessionLoading
-                                    ? 'Inicializando pagamento seguro…'
-                                    : cajupayMissingFieldsHint
-                            }}
-                        </span>
-                    </div>
-                </div>
-                <p v-if="cajupayPolling" class="text-xs text-gray-500">Aguardando confirmação do pagamento…</p>
-            </div>
-
             <!-- Formulário de cartão (Stripe Elements ou campos Efí) -->
             <div
-                v-if="form.payment_method === 'card' && !isCajuPaySdkFlow"
+                v-if="form.payment_method === 'card'"
                 class="space-y-4 rounded-xl border-2 border-gray-100 bg-gray-50/50 p-4"
                 data-checkout="form-card-panel"
             >
@@ -2650,7 +2252,7 @@ function submit() {
 
             <!-- Endereço para boleto ou cartão Pagar.me (billing address na API) -->
             <div
-                v-if="showBillingAddressBlock && !isCajuPaySdkFlow"
+                v-if="showBillingAddressBlock"
                 class="space-y-4 rounded-xl border-2 border-gray-100 bg-gray-50/50 p-4"
                 data-checkout="form-billing-address"
             >
@@ -2771,7 +2373,6 @@ function submit() {
                 <ScanQrCode v-else-if="form.payment_method === 'pix' || form.payment_method === 'pix_auto'" class="h-5 w-5" />
                 <CreditCard v-else-if="form.payment_method === 'card'" class="h-5 w-5" />
                 <FileText v-else-if="form.payment_method === 'boleto'" class="h-5 w-5" />
-                <Shield v-else-if="form.payment_method === 'apple_pay' || form.payment_method === 'google_pay'" class="h-5 w-5" />
                 <ShoppingBag v-else class="h-5 w-5" />
                 <template v-if="cardApproved">
                     Aprovado!
@@ -2800,11 +2401,7 @@ function submit() {
                                 ? (isCardGatewayAsaas && asaasCardStep === 1 ? 'Continuar' : (t('checkout.pagar_cartao') || 'Pagar com cartão'))
                                 : form.payment_method === 'boleto'
                                   ? (t('checkout.gerar_boleto') || 'Gerar boleto')
-                                  : form.payment_method === 'apple_pay'
-                                    ? 'Pagar com Apple Pay'
-                                    : form.payment_method === 'google_pay'
-                                      ? 'Pagar com Google Pay'
-                                      : t('checkout.submit_button')
+                                  : t('checkout.submit_button')
                     }}
                 </template>
             </button>

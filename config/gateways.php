@@ -12,7 +12,7 @@ return [
             'slug' => 'cajupay',
             'name' => 'CajuPay',
             'image' => 'images/gateways/cajupay.png',
-            'methods' => ['pix', 'card', 'boleto', 'apple_pay', 'google_pay'],
+            'methods' => ['pix'],
             'scope' => 'national',
             'country' => 'br',
             'country_name' => 'Brasil',
@@ -164,11 +164,9 @@ return [
     */
     'default_order' => [
         'pix' => ['cajupay', 'spacepag', 'efi', 'mercadopago', 'pagarme', 'pushinpay', 'asaas'],
-        'card' => ['cajupay', 'efi', 'stripe', 'mercadopago', 'pagarme', 'asaas'],
-        'boleto' => ['cajupay', 'efi', 'mercadopago', 'pagarme', 'asaas'],
+        'card' => ['efi', 'stripe', 'mercadopago', 'pagarme', 'asaas'],
+        'boleto' => ['efi', 'mercadopago', 'pagarme', 'asaas'],
         'pix_auto' => ['efi', 'pushinpay'],
-        'apple_pay' => ['cajupay'],
-        'google_pay' => ['cajupay'],
         'crypto' => [],
     ],
 ];

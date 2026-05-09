@@ -454,12 +454,6 @@ class ProdutosController extends Controller
             'payment_gateways.pix_auto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.pix_auto_redundancy' => ['nullable', 'array'],
             'payment_gateways.pix_auto_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.apple_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.apple_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.apple_pay_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.google_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.google_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.google_pay_redundancy.*' => ['string', 'max:64'],
             'payment_gateways.crypto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.crypto_redundancy' => ['nullable', 'array'],
             'payment_gateways.crypto_redundancy.*' => ['string', 'max:64'],
@@ -622,10 +616,6 @@ class ProdutosController extends Controller
                 'card_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $paymentGateways['card_redundancy'] ?? []))),
                 'boleto' => ! empty($paymentGateways['boleto']) ? $paymentGateways['boleto'] : null,
                 'boleto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $paymentGateways['boleto_redundancy'] ?? []))),
-                'apple_pay' => ! empty($paymentGateways['apple_pay']) ? $paymentGateways['apple_pay'] : null,
-                'apple_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $paymentGateways['apple_pay_redundancy'] ?? []))),
-                'google_pay' => ! empty($paymentGateways['google_pay']) ? $paymentGateways['google_pay'] : null,
-                'google_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $paymentGateways['google_pay_redundancy'] ?? []))),
                 'crypto' => ! empty($paymentGateways['crypto']) ? $paymentGateways['crypto'] : null,
                 'crypto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $paymentGateways['crypto_redundancy'] ?? []))),
             ];
@@ -1133,9 +1123,9 @@ class ProdutosController extends Controller
     }
 
     /**
-     * Gateways conectados agrupados por método (pix, card, boleto, pix_auto, apple_pay, google_pay, crypto).
+     * Gateways conectados agrupados por método (pix, card, boleto).
      *
-     * @return array{pix: array<int, array{slug: string, name: string}>, card: array, boleto: array, pix_auto: array, apple_pay: array, google_pay: array, crypto: array}
+     * @return array{pix: array<int, array{slug: string, name: string}>, card: array, boleto: array, crypto: array}
      */
     private function gatewaysByMethodForTenant(?int $tenantId): array
     {
@@ -1143,15 +1133,7 @@ class ProdutosController extends Controller
             ->where('is_connected', true)
             ->pluck('gateway_slug')
             ->all();
-        $byMethod = [
-            'pix' => [],
-            'card' => [],
-            'boleto' => [],
-            'pix_auto' => [],
-            'apple_pay' => [],
-            'google_pay' => [],
-            'crypto' => [],
-        ];
+        $byMethod = ['pix' => [], 'card' => [], 'boleto' => [], 'pix_auto' => [], 'crypto' => []];
         foreach (GatewayRegistry::all() as $gateway) {
             $slug = $gateway['slug'] ?? '';
             if (! in_array($slug, $connectedSlugs, true)) {
@@ -1159,7 +1141,7 @@ class ProdutosController extends Controller
             }
             $methods = $gateway['methods'] ?? [];
             $item = ['slug' => $slug, 'name' => $gateway['name'] ?? $slug];
-            foreach (['pix', 'card', 'boleto', 'pix_auto', 'apple_pay', 'google_pay', 'crypto'] as $method) {
+            foreach (['pix', 'card', 'boleto', 'pix_auto', 'crypto'] as $method) {
                 if (in_array($method, $methods, true)) {
                     $byMethod[$method][] = $item;
                 }

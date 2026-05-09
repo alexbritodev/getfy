@@ -25,10 +25,6 @@ const form = useForm({
         boleto_redundancy: Array.isArray(pg.boleto_redundancy) ? pg.boleto_redundancy : [],
         pix_auto: pg.pix_auto ?? '',
         pix_auto_redundancy: Array.isArray(pg.pix_auto_redundancy) ? pg.pix_auto_redundancy : [],
-        apple_pay: pg.apple_pay ?? '',
-        apple_pay_redundancy: Array.isArray(pg.apple_pay_redundancy) ? pg.apple_pay_redundancy : [],
-        google_pay: pg.google_pay ?? '',
-        google_pay_redundancy: Array.isArray(pg.google_pay_redundancy) ? pg.google_pay_redundancy : [],
         crypto: pg.crypto ?? '',
         crypto_redundancy: Array.isArray(pg.crypto_redundancy) ? pg.crypto_redundancy : [],
     },
@@ -48,7 +44,7 @@ function gatewayOptions(method) {
     ];
 }
 
-const METHOD_LABELS = { pix: 'PIX', card: 'Cartão', boleto: 'Boleto', pix_auto: 'PIX automático', apple_pay: 'Apple Pay', google_pay: 'Google Pay', crypto: 'Criptomoeda' };
+const METHOD_LABELS = { pix: 'PIX', card: 'Cartão', boleto: 'Boleto', pix_auto: 'PIX automático', crypto: 'Criptomoeda' };
 const redundancySidebarOpen = ref(false);
 const redundancySidebarMethod = ref(null);
 
@@ -119,7 +115,7 @@ function submit() {
                     Selecione o gateway principal e a ordem de redundância para cada método.
                 </p>
                 <div class="mt-4 space-y-3">
-                    <template v-for="method in ['pix', 'card', 'boleto', 'apple_pay', 'google_pay', 'pix_auto', 'crypto']" :key="method">
+                    <template v-for="method in ['pix', 'card', 'boleto', 'pix_auto', 'crypto']" :key="method">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="w-24 text-sm font-medium text-zinc-700 dark:text-zinc-300">{{ METHOD_LABELS[method] || method }}</span>
                             <select

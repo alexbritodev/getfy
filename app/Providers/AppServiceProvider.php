@@ -44,36 +44,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Override de URL pública (ngrok, cloudflared, tunnels de dev) — quando setada, força
-        // todas as URLs (url(), route(), redirect(), asset/Vite) e o cookie de sessão a usarem
-        // esse host. Útil quando o tunnel reescreve o header Host (ex.: ngrok --host-header)
-        // e o Apache local atende por outro vhost (ex.: getfy-opensource.test). Sem isso o
-        // navegador é redirecionado de volta para o vhost local.
-        $publicOverride = trim((string) env('PUBLIC_URL_OVERRIDE', ''));
-        if ($publicOverride !== '') {
-            $publicOverride = rtrim($publicOverride, '/');
-            URL::forceRootUrl($publicOverride);
-            if (str_starts_with($publicOverride, 'https://')) {
-                URL::forceScheme('https');
-            }
-            $publicHost = parse_url($publicOverride, PHP_URL_HOST);
-            if (is_string($publicHost) && $publicHost !== '') {
-                config(['session.domain' => $publicHost]);
-            }
-
-            // O disk "public" do Laravel resolve sua URL via APP_URL no momento de boot do
-            // config (config/filesystems.php → 'url' => env('APP_URL').'/storage'). Como aqui
-            // a gente força o domínio público depois disso, Storage::url() / asset() ainda
-            // emitem URLs com APP_URL local — gerando Mixed Content quando a página é
-            // servida via HTTPS pelo tunnel. Sobrescrevemos para acompanhar o override.
-            // Também sincronizamos config('app.url') para que helpers que leem dele direto
-            // (ex.: alguns geradores de URL de cdns/imagens) também respeitem o tunnel.
-            config([
-                'app.url' => $publicOverride,
-                'filesystems.disks.public.url' => $publicOverride . '/storage',
-            ]);
-        }
-
         // Gera links absolutos (Vite, asset, route) em HTTPS quando APP_URL já é https — evita
         // mistura http/https atrás de proxy que não envia X-Forwarded-Proto (ex.: domínio custom na cloud).
         $appUrl = (string) config('app.url', '');

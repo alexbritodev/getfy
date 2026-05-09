@@ -3,12 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Gateways\GatewayRegistry;
-use App\Gateways\CajuPay\CajuPayDriver;
 use App\Models\GatewayCredential;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -215,11 +213,6 @@ class GatewaysController extends Controller
             }
         }
 
-        $webhookWarning = null;
-        if ($slug === 'cajupay' && $isConnected && $driver instanceof CajuPayDriver) {
-            $credentials = $this->ensureCajuPayWebhookRegistered($driver, $credentials, $webhookWarning);
-        }
-
         $credential->is_connected = $isConnected;
         $credential->setEncryptedCredentials($credentials);
         $credential->save();
@@ -228,7 +221,6 @@ class GatewaysController extends Controller
             'success' => true,
             'is_connected' => $isConnected,
             'message' => $isConnected ? 'Credenciais salvas e conexão verificada.' : 'Credenciais salvas.',
-            'webhook_warning' => $webhookWarning,
         ]);
     }
 
@@ -290,20 +282,9 @@ class GatewaysController extends Controller
 
         try {
             $ok = $driver->testConnection($credentials);
-
-            $webhookWarning = null;
-            if ($ok && $slug === 'cajupay' && $driver instanceof CajuPayDriver) {
-                $credentials = $this->ensureCajuPayWebhookRegistered($driver, $credentials, $webhookWarning);
-                if ($credential) {
-                    $credential->setEncryptedCredentials($credentials);
-                    $credential->save();
-                }
-            }
-
             return response()->json([
                 'success' => $ok,
                 'message' => $ok ? 'Conexão realizada com sucesso.' : 'Falha na autenticação. Verifique as credenciais.',
-                'webhook_warning' => $webhookWarning,
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -311,68 +292,6 @@ class GatewaysController extends Controller
                 'message' => $e->getMessage() ?: 'Erro ao testar conexão.',
             ], 422);
         }
-    }
-
-    /**
-     * Auto-registra (ou rotaciona) o endpoint de webhook na API CajuPay e devolve
-     * o array de credentials atualizado com webhook_endpoint_id e webhook_signing_secret.
-     * Falhas só geram warning para a UI — não impedem o save.
-     *
-     * @param  array<string, mixed>  $credentials
-     * @param  string|null  $warning  out param
-     * @return array<string, mixed>
-     */
-    private function ensureCajuPayWebhookRegistered(CajuPayDriver $driver, array $credentials, ?string &$warning): array
-    {
-        $warning = null;
-        try {
-            $url = route('webhooks.cajupay');
-        } catch (\Throwable) {
-            $warning = 'Webhook CajuPay: rota webhooks.cajupay indisponível.';
-            return $credentials;
-        }
-
-        try {
-            $existing = $driver->listWebhookEndpoints($credentials);
-        } catch (\Throwable $e) {
-            $existing = [];
-            Log::debug('GatewaysController: list webhooks CajuPay falhou', ['error' => $e->getMessage()]);
-        }
-
-        $foundId = null;
-        foreach ($existing as $endpoint) {
-            if (! is_array($endpoint)) {
-                continue;
-            }
-            if (($endpoint['url'] ?? null) === $url) {
-                $foundId = is_string($endpoint['id'] ?? null) ? $endpoint['id'] : null;
-                break;
-            }
-        }
-
-        // Se já existe e já temos signing_secret salvo, mantém — para evitar invalidar
-        // uma assinatura existente sem necessidade.
-        if ($foundId !== null && ! empty($credentials['webhook_endpoint_id']) && ! empty($credentials['webhook_signing_secret'])) {
-            return $credentials;
-        }
-
-        try {
-            $reg = $driver->registerWebhookEndpoint($credentials, $url, $foundId);
-        } catch (\Throwable $e) {
-            $warning = 'Webhook ainda não registrado: ' . $e->getMessage();
-            Log::warning('GatewaysController: registro de webhook CajuPay falhou', [
-                'error' => $e->getMessage(),
-                'url' => $url,
-            ]);
-            return $credentials;
-        }
-
-        $credentials['webhook_endpoint_id'] = $reg['endpoint_id'];
-        if (! empty($reg['signing_secret'])) {
-            $credentials['webhook_signing_secret'] = $reg['signing_secret'];
-        }
-
-        return $credentials;
     }
 
     public function updateCertificate(Request $request, string $slug): JsonResponse
@@ -467,10 +386,6 @@ class GatewaysController extends Controller
             'gateway_order.boleto.*' => ['string', 'max:64'],
             'gateway_order.pix_auto' => ['nullable', 'array'],
             'gateway_order.pix_auto.*' => ['string', 'max:64'],
-            'gateway_order.apple_pay' => ['nullable', 'array'],
-            'gateway_order.apple_pay.*' => ['string', 'max:64'],
-            'gateway_order.google_pay' => ['nullable', 'array'],
-            'gateway_order.google_pay.*' => ['string', 'max:64'],
         ]);
 
         $tenantId = auth()->user()->tenant_id;
@@ -508,7 +423,7 @@ class GatewaysController extends Controller
     }
 
     /**
-     * @return array{pix: array<string>, card: array<string>, boleto: array<string>, pix_auto: array<string>, apple_pay: array<string>, google_pay: array<string>}
+     * @return array{pix: array<string>, card: array<string>, boleto: array<string>, pix_auto: array<string>}
      */
     private function getGatewayOrder(?int $tenantId): array
     {
@@ -519,14 +434,7 @@ class GatewaysController extends Controller
                 $raw = $decoded;
             }
         }
-        $default = config('gateways.default_order', [
-            'pix' => [],
-            'card' => [],
-            'boleto' => [],
-            'pix_auto' => [],
-            'apple_pay' => [],
-            'google_pay' => [],
-        ]);
+        $default = config('gateways.default_order', ['pix' => [], 'card' => [], 'boleto' => [], 'pix_auto' => []]);
         if (!is_array($raw)) {
             return $default;
         }
@@ -535,8 +443,6 @@ class GatewaysController extends Controller
             'card' => $raw['card'] ?? $default['card'] ?? [],
             'boleto' => $raw['boleto'] ?? $default['boleto'] ?? [],
             'pix_auto' => $raw['pix_auto'] ?? $default['pix_auto'] ?? [],
-            'apple_pay' => $raw['apple_pay'] ?? $default['apple_pay'] ?? [],
-            'google_pay' => $raw['google_pay'] ?? $default['google_pay'] ?? [],
         ];
     }
 }

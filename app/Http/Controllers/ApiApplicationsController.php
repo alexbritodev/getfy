@@ -46,15 +46,7 @@ class ApiApplicationsController extends Controller
     private function gatewaysByMethod(?int $tenantId): array
     {
         $list = $this->buildGatewaysList($tenantId);
-        $byMethod = [
-            'pix' => [],
-            'card' => [],
-            'boleto' => [],
-            'pix_auto' => [],
-            'apple_pay' => [],
-            'google_pay' => [],
-            'crypto' => [],
-        ];
+        $byMethod = ['pix' => [], 'card' => [], 'boleto' => [], 'pix_auto' => [], 'crypto' => []];
         foreach ($list as $g) {
             foreach ($g['methods'] ?? [] as $method) {
                 if (isset($byMethod[$method])) {
@@ -116,12 +108,6 @@ class ApiApplicationsController extends Controller
             'payment_gateways.pix_auto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.pix_auto_redundancy' => ['nullable', 'array'],
             'payment_gateways.pix_auto_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.apple_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.apple_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.apple_pay_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.google_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.google_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.google_pay_redundancy.*' => ['string', 'max:64'],
             'payment_gateways.crypto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.crypto_redundancy' => ['nullable', 'array'],
             'payment_gateways.crypto_redundancy.*' => ['string', 'max:64'],
@@ -147,10 +133,6 @@ class ApiApplicationsController extends Controller
             'boleto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['boleto_redundancy'] ?? []))),
             'pix_auto' => ! empty($pg['pix_auto']) ? $pg['pix_auto'] : null,
             'pix_auto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['pix_auto_redundancy'] ?? []))),
-            'apple_pay' => ! empty($pg['apple_pay']) ? $pg['apple_pay'] : null,
-            'apple_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['apple_pay_redundancy'] ?? []))),
-            'google_pay' => ! empty($pg['google_pay']) ? $pg['google_pay'] : null,
-            'google_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['google_pay_redundancy'] ?? []))),
             'crypto' => ! empty($pg['crypto']) ? $pg['crypto'] : null,
             'crypto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['crypto_redundancy'] ?? []))),
         ];
@@ -232,12 +214,6 @@ class ApiApplicationsController extends Controller
             'payment_gateways.pix_auto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.pix_auto_redundancy' => ['nullable', 'array'],
             'payment_gateways.pix_auto_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.apple_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.apple_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.apple_pay_redundancy.*' => ['string', 'max:64'],
-            'payment_gateways.google_pay' => ['nullable', 'string', 'max:64'],
-            'payment_gateways.google_pay_redundancy' => ['nullable', 'array'],
-            'payment_gateways.google_pay_redundancy.*' => ['string', 'max:64'],
             'payment_gateways.crypto' => ['nullable', 'string', 'max:64'],
             'payment_gateways.crypto_redundancy' => ['nullable', 'array'],
             'payment_gateways.crypto_redundancy.*' => ['string', 'max:64'],
@@ -259,10 +235,6 @@ class ApiApplicationsController extends Controller
             'boleto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['boleto_redundancy'] ?? []))),
             'pix_auto' => ! empty($pg['pix_auto']) ? $pg['pix_auto'] : null,
             'pix_auto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['pix_auto_redundancy'] ?? []))),
-            'apple_pay' => ! empty($pg['apple_pay']) ? $pg['apple_pay'] : null,
-            'apple_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['apple_pay_redundancy'] ?? []))),
-            'google_pay' => ! empty($pg['google_pay']) ? $pg['google_pay'] : null,
-            'google_pay_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['google_pay_redundancy'] ?? []))),
             'crypto' => ! empty($pg['crypto']) ? $pg['crypto'] : null,
             'crypto_redundancy' => array_values(array_filter(array_map(fn ($s) => is_string($s) ? trim($s) : '', $pg['crypto_redundancy'] ?? []))),
         ];

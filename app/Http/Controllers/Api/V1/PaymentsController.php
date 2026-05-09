@@ -317,23 +317,7 @@ class PaymentsController extends Controller
 
         $order = $ctx['order'];
         $paymentService = app(PaymentService::class);
-
-        // Resolve return_url para gateways que exigem (ex.: Stripe em fluxos com possibilidade
-        // de redirect/3DS). Usa default_return_url do tenant quando válido; caso contrário,
-        // recorre à rota interna `payments.return`.
-        $tenantReturnUrl = is_string($app->default_return_url ?? null) ? trim((string) $app->default_return_url) : '';
-        if ($tenantReturnUrl !== '' && ! filter_var($tenantReturnUrl, FILTER_VALIDATE_URL)) {
-            $tenantReturnUrl = '';
-        }
-        $returnUrl = $tenantReturnUrl !== ''
-            ? $tenantReturnUrl
-            : route('payments.return', ['order' => $order->id]);
-
-        $card = [
-            'payment_token' => $validated['card']['payment_token'],
-            'card_mask' => $validated['card']['card_mask'] ?? null,
-            'return_url' => $returnUrl,
-        ];
+        $card = ['payment_token' => $validated['card']['payment_token'], 'card_mask' => $validated['card']['card_mask'] ?? null];
 
         try {
             event(new OrderPending($order));

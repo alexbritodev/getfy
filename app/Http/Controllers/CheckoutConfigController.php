@@ -145,14 +145,9 @@ class CheckoutConfigController extends Controller
         $file = $request->file('image');
         $name = Str::uuid() . '.' . $file->getClientOriginalExtension();
         $path = $storage->putFileAs('checkout/' . $produto->id, $file, $name);
+        $url = $storage->url($path);
 
-        // Retornamos a URL relativa (/storage/...) para nunca ficarmos amarrados a um host
-        // específico no DB. Isso evita problemas de Mixed Content quando a aplicação é
-        // servida por um host diferente do APP_URL (ex.: ngrok HTTPS apontando pro Laragon).
-        // O navegador resolve / como o host da página atual, então funciona em qualquer ambiente.
-        $relativeUrl = '/storage/' . ltrim($path, '/');
-
-        return response()->json(['url' => $relativeUrl], HttpResponse::HTTP_CREATED);
+        return response()->json(['url' => $url], HttpResponse::HTTP_CREATED);
     }
 
     private function authorizeProduct(Product $produto): void

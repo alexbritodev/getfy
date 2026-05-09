@@ -256,7 +256,7 @@ const props = defineProps({
     cademi_integrations: { type: Array, default: () => [] },
     gateways_by_method: {
         type: Object,
-        default: () => ({ pix: [], card: [], boleto: [], pix_auto: [], apple_pay: [], google_pay: [], crypto: [] }),
+        default: () => ({ pix: [], card: [], boleto: [], pix_auto: [], crypto: [] }),
     },
     plugin_product_panels: { type: Array, default: () => [] },
 });
@@ -375,10 +375,6 @@ const form = useForm({
         boleto_redundancy: Array.isArray(pg.boleto_redundancy) ? pg.boleto_redundancy : [],
         pix_auto: pg.pix_auto ?? '',
         pix_auto_redundancy: Array.isArray(pg.pix_auto_redundancy) ? pg.pix_auto_redundancy : [],
-        apple_pay: pg.apple_pay ?? '',
-        apple_pay_redundancy: Array.isArray(pg.apple_pay_redundancy) ? pg.apple_pay_redundancy : [],
-        google_pay: pg.google_pay ?? '',
-        google_pay_redundancy: Array.isArray(pg.google_pay_redundancy) ? pg.google_pay_redundancy : [],
         crypto: pg.crypto ?? '',
         crypto_redundancy: Array.isArray(pg.crypto_redundancy) ? pg.crypto_redundancy : [],
     },
@@ -1134,7 +1130,7 @@ function gatewayOptions(method) {
 
 const redundancySidebarOpen = ref(false);
 const redundancySidebarMethod = ref(null);
-const METHOD_LABELS = { pix: 'PIX', card: 'Cartão', boleto: 'Boleto', pix_auto: 'PIX automático', apple_pay: 'Apple Pay', google_pay: 'Google Pay', crypto: 'Criptomoeda' };
+const METHOD_LABELS = { pix: 'PIX', card: 'Cartão', boleto: 'Boleto', pix_auto: 'PIX automático', crypto: 'Criptomoeda' };
 function openRedundancySidebar(method) {
     redundancySidebarMethod.value = method;
     redundancySidebarOpen.value = true;
@@ -1241,10 +1237,6 @@ function submit() {
             (form.payment_gateways.card_redundancy || []).forEach((s) => fd.append('payment_gateways[card_redundancy][]', s));
             fd.append('payment_gateways[boleto]', form.payment_gateways.boleto || '');
             (form.payment_gateways.boleto_redundancy || []).forEach((s) => fd.append('payment_gateways[boleto_redundancy][]', s));
-            fd.append('payment_gateways[apple_pay]', form.payment_gateways.apple_pay || '');
-            (form.payment_gateways.apple_pay_redundancy || []).forEach((s) => fd.append('payment_gateways[apple_pay_redundancy][]', s));
-            fd.append('payment_gateways[google_pay]', form.payment_gateways.google_pay || '');
-            (form.payment_gateways.google_pay_redundancy || []).forEach((s) => fd.append('payment_gateways[google_pay_redundancy][]', s));
             fd.append('payment_gateways[crypto]', form.payment_gateways.crypto || '');
             (form.payment_gateways.crypto_redundancy || []).forEach((s) => fd.append('payment_gateways[crypto_redundancy][]', s));
             if (form.billing_type === 'subscription') {
@@ -1939,77 +1931,6 @@ function submit() {
                                     </button>
                                     <p v-if="gateways_by_method.boleto.length === 0" class="text-xs text-zinc-500 dark:text-zinc-400">
                                         <Link href="/integracoes?tab=gateways" class="text-[var(--color-primary)] hover:underline">Conectar gateway</Link>
-                                    </p>
-                                </div>
-                            </div>
-                            <!-- Apple Pay -->
-                            <div class="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-5 dark:border-zinc-600/80 dark:bg-zinc-800/50">
-                                <div class="flex flex-col gap-3">
-                                    <div class="flex items-center gap-3">
-                                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-black p-2 shadow-sm">
-                                            <svg viewBox="0 0 24 24" class="h-5 w-5 text-white" fill="currentColor" aria-hidden="true">
-                                                <path d="M17.564 12.42c-.02-2.11 1.72-3.13 1.8-3.18-0.98-1.43-2.5-1.62-3.04-1.64-1.29-.13-2.52.76-3.17.76-.66 0-1.66-.74-2.74-.72-1.41.02-2.71.82-3.43 2.08-1.46 2.54-.37 6.3 1.06 8.36.7 1.01 1.53 2.14 2.62 2.1 1.05-.04 1.45-.68 2.72-.68 1.27 0 1.62.68 2.73.66 1.13-.02 1.85-1.03 2.54-2.04.8-1.17 1.13-2.31 1.15-2.37-.03-.01-2.21-.85-2.24-3.33zM15.43 5.36c.58-.7.97-1.67.86-2.64-.84.03-1.85.56-2.45 1.26-.54.62-1.01 1.61-.88 2.56.93.07 1.89-.47 2.47-1.18z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p class="font-semibold text-zinc-900 dark:text-white">Apple Pay</p>
-                                            <p class="text-xs text-zinc-500 dark:text-zinc-400">Carteira digital (iOS / Safari)</p>
-                                        </div>
-                                    </div>
-                                    <GatewaySelect
-                                        v-model="form.payment_gateways.apple_pay"
-                                        :options="gatewayOptions('apple_pay')"
-                                        placeholder="Nenhum"
-                                        label="Gateway Apple Pay"
-                                    />
-                                    <button
-                                        v-if="canShowRedundancy(form.payment_gateways.apple_pay)"
-                                        type="button"
-                                        class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)] dark:border-zinc-600 dark:text-zinc-300 dark:hover:border-[var(--color-primary)] dark:hover:bg-[var(--color-primary)]/20"
-                                        @click="openRedundancySidebar('apple_pay')"
-                                    >
-                                        <Layers class="h-4 w-4" />
-                                        Redundância
-                                    </button>
-                                    <p v-if="(gateways_by_method.apple_pay || []).length === 0" class="text-xs text-zinc-500 dark:text-zinc-400">
-                                        <Link href="/integracoes?tab=gateways" class="text-[var(--color-primary)] hover:underline">Conectar gateway compatível (CajuPay)</Link>
-                                    </p>
-                                </div>
-                            </div>
-                            <!-- Google Pay -->
-                            <div class="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-5 dark:border-zinc-600/80 dark:bg-zinc-800/50">
-                                <div class="flex flex-col gap-3">
-                                    <div class="flex items-center gap-3">
-                                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-2 shadow-sm">
-                                            <svg viewBox="0 0 24 24" class="h-6 w-6" aria-hidden="true">
-                                                <path fill="#4285F4" d="M21.6 12.227c0-.71-.064-1.391-.182-2.045H12v3.873h5.39a4.61 4.61 0 0 1-2 3.025v2.512h3.235c1.893-1.745 2.975-4.314 2.975-7.365z" />
-                                                <path fill="#34A853" d="M12 22c2.7 0 4.964-.895 6.625-2.408l-3.235-2.512c-.896.6-2.041.955-3.39.955-2.605 0-4.81-1.76-5.598-4.124H3.057v2.59A9.997 9.997 0 0 0 12 22z" />
-                                                <path fill="#FBBC05" d="M6.402 13.911A5.99 5.99 0 0 1 6.09 12c0-.664.114-1.31.312-1.911V7.5H3.057A9.997 9.997 0 0 0 2 12c0 1.614.385 3.14 1.057 4.5l3.345-2.589z" />
-                                                <path fill="#EA4335" d="M12 5.977c1.468 0 2.785.504 3.823 1.494l2.866-2.866C16.96 3.092 14.7 2.182 12 2.182A9.997 9.997 0 0 0 3.057 7.5l3.345 2.589c.788-2.364 2.993-4.112 5.598-4.112z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p class="font-semibold text-zinc-900 dark:text-white">Google Pay</p>
-                                            <p class="text-xs text-zinc-500 dark:text-zinc-400">Carteira digital (Android / Chrome)</p>
-                                        </div>
-                                    </div>
-                                    <GatewaySelect
-                                        v-model="form.payment_gateways.google_pay"
-                                        :options="gatewayOptions('google_pay')"
-                                        placeholder="Nenhum"
-                                        label="Gateway Google Pay"
-                                    />
-                                    <button
-                                        v-if="canShowRedundancy(form.payment_gateways.google_pay)"
-                                        type="button"
-                                        class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)] dark:border-zinc-600 dark:text-zinc-300 dark:hover:border-[var(--color-primary)] dark:hover:bg-[var(--color-primary)]/20"
-                                        @click="openRedundancySidebar('google_pay')"
-                                    >
-                                        <Layers class="h-4 w-4" />
-                                        Redundância
-                                    </button>
-                                    <p v-if="(gateways_by_method.google_pay || []).length === 0" class="text-xs text-zinc-500 dark:text-zinc-400">
-                                        <Link href="/integracoes?tab=gateways" class="text-[var(--color-primary)] hover:underline">Conectar gateway compatível (CajuPay)</Link>
                                     </p>
                                 </div>
                             </div>

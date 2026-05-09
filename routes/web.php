@@ -97,7 +97,6 @@ Route::middleware('throttle:60,1')->group(function () {
     Route::post('/webhooks/gateways/pushinpay', [\App\Http\Controllers\Webhooks\PushinPayWebhookController::class, 'handle'])->name('webhooks.pushinpay');
     Route::post('/webhooks/gateways/asaas', [\App\Http\Controllers\Webhooks\AsaasWebhookController::class, 'handle'])->name('webhooks.asaas');
     Route::post('/webhooks/gateways/pagarme', [\App\Http\Controllers\Webhooks\PagarmeWebhookController::class, 'handle'])->name('webhooks.pagarme');
-    Route::post('/webhooks/gateways/cajupay', [\App\Http\Controllers\Webhooks\CajuPayWebhookController::class, 'handle'])->name('webhooks.cajupay');
     // Dispatcher genérico para gateways de plugins (webhook_handler na definição do gateway)
     Route::post('/webhooks/gateways/{slug}', \App\Http\Controllers\Webhooks\GenericGatewayWebhookController::class)
         ->where('slug', '[a-z0-9_-]+')
@@ -128,23 +127,10 @@ Route::get('/c/{slug}', [\App\Http\Controllers\CheckoutController::class, 'show'
 Route::get('/checkout/pix', [\App\Http\Controllers\CheckoutController::class, 'pixPage'])->name('checkout.pix');
 Route::get('/checkout/boleto', [\App\Http\Controllers\CheckoutController::class, 'boletoPage'])->name('checkout.boleto');
 Route::get('/checkout/order-status', [\App\Http\Controllers\CheckoutController::class, 'orderStatus'])->name('checkout.order-status')->middleware('throttle:30,1');
-
-// Página genérica de retorno para gateways que exigem return_url (ex.: Stripe 3DS)
-// quando o tenant não definiu um default_return_url próprio.
-Route::get('/payments/return/{order}', [\App\Http\Controllers\PaymentReturnController::class, 'show'])
-    ->name('payments.return')
-    ->where('order', '[0-9]+')
-    ->middleware('throttle:60,1');
 Route::post('/checkout', [\App\Http\Controllers\CheckoutController::class, 'process'])
     ->name('checkout.process')
     // Rate limit geral do endpoint + limite específico de PIX (3/5min por IP)
     ->middleware(['throttle:30,1', 'throttle:checkout-pix']);
-Route::post('/checkout/cajupay/session', [\App\Http\Controllers\CheckoutController::class, 'cajupaySession'])
-    ->name('checkout.cajupay.session')
-    ->middleware('throttle:30,1');
-Route::post('/checkout/cajupay/confirm-order', [\App\Http\Controllers\CheckoutController::class, 'cajupayConfirmOrder'])
-    ->name('checkout.cajupay.confirm-order')
-    ->middleware('throttle:30,1');
 // Pagar.me tokenizecard: se o submit HTML não for cancelado, evita POST na rota GET /c/{slug} (405).
 Route::post('/checkout/pagarme-tokenize-sink', fn () => response()->noContent())
     ->name('checkout.pagarme-tokenize-sink')

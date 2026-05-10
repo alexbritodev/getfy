@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'webhooks/gateways/*',
             'webhooks/inbound/*',
+            // Alias documentado por integradores CajuPay (POST sem token CSRF)
+            'checkout/cajupay/webhook',
         ]);
 
         $middleware->web(prepend: [

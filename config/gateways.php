@@ -26,6 +26,13 @@ return [
             'credential_keys' => [
                 ['key' => 'public_key', 'label' => 'Chave pública', 'type' => 'text'],
                 ['key' => 'secret_key', 'label' => 'Chave secreta', 'type' => 'password'],
+                [
+                    'key' => 'webhook_signing_secret',
+                    'label' => 'Token do webhook (signing secret)',
+                    'type' => 'password',
+                    'optional' => true,
+                    'hint' => 'Cole o token no formato cwhsec_… exibido uma vez no painel CajuPay (Webhooks) ou na resposta do POST /api/webhooks/endpoints. Necessário para validar as notificações de pagamento no Getfy. Deixe em branco ao salvar para manter o token já gravado.',
+                ],
             ],
         ],
         'spacepag' => [

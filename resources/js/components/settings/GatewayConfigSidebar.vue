@@ -28,6 +28,7 @@ const testSuccess = ref(null);
 const credentialValues = ref({});
 const certificateFile = ref(null);
 const webhookCopied = ref(false);
+const webhookCopiedSecondary = ref(false);
 const disconnecting = ref(false);
 
 async function copyWebhookUrl() {
@@ -42,6 +43,18 @@ async function copyWebhookUrl() {
     }
 }
 
+async function copyWebhookUrlSecondary() {
+    const url = gateway.value?.webhook_url_secondary;
+    if (!url) return;
+    try {
+        await navigator.clipboard.writeText(url);
+        webhookCopiedSecondary.value = true;
+        setTimeout(() => { webhookCopiedSecondary.value = false; }, 2000);
+    } catch {
+        webhookCopiedSecondary.value = false;
+    }
+}
+
 watch(
     () => [props.open, props.gatewaySlug],
     async ([open, slug]) => {
@@ -49,6 +62,7 @@ watch(
             loading.value = true;
             testMessage.value = null;
             webhookCopied.value = false;
+            webhookCopiedSecondary.value = false;
             credentialValues.value = {};
             try {
                 const { data } = await axios.get(
@@ -109,9 +123,10 @@ async function testConnection() {
     for (const k of keys) {
         if (k.key === certificateKey) continue;
         if ((k.type || 'text') === 'boolean') continue;
+        if (k.optional) continue;
         const v = credentialValues.value[k.key];
         if (v == null || String(v).trim() === '') {
-            testMessage.value = 'Preencha todas as credenciais para testar.';
+            testMessage.value = 'Preencha todas as credenciais obrigatórias para testar.';
             testSuccess.value = false;
             return;
         }
@@ -131,7 +146,8 @@ async function testConnection() {
             { headers: { 'X-XSRF-TOKEN': getCsrfToken(), Accept: 'application/json' } }
         );
         testSuccess.value = data.success;
-        testMessage.value = data.message || (data.success ? 'Conexão OK.' : 'Falha.');
+        const parts = [data.message || (data.success ? 'Conexão OK.' : 'Falha.'), data.webhook_warning].filter(Boolean);
+        testMessage.value = parts.join(' ');
     } catch (err) {
         testSuccess.value = false;
         testMessage.value =
@@ -298,18 +314,34 @@ const canTestConnection = computed(() => {
                         Criar conta no {{ gateway.name }}
                     </a>
 
-                    <!-- URL do webhook para configurar no painel do gateway -->
+                    <!-- Webhook: URL(s) no painel do gateway + token nas credenciais (CajuPay, etc.) -->
                     <div
                         v-if="gateway.webhook_url"
                         class="mb-6 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-600 dark:bg-zinc-800/50"
                     >
                         <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                            URL do webhook
+                            Webhook (URL no {{ gateway.name }})
                         </h3>
-                        <p class="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
+                        <template v-if="gateway.slug === 'cajupay'">
+                            <p class="mb-3 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+                                No painel CajuPay, em <strong class="font-medium text-zinc-800 dark:text-zinc-200">Webhooks</strong>, cadastre uma das URLs abaixo e os eventos de checkout/cartão.
+                                Copie o <strong class="font-medium text-zinc-800 dark:text-zinc-200">token</strong> (<code class="rounded bg-zinc-200 px-0.5 text-[11px] dark:bg-zinc-700">cwhsec_…</code>) exibido uma vez e cole no campo
+                                <strong class="font-medium text-zinc-800 dark:text-zinc-200">Token do webhook</strong> em Credenciais. O “Testar conexão” pode registrar a URL principal na API automaticamente; se você já cadastrou manualmente no painel CajuPay, basta salvar o token.
+                            </p>
+                            <p class="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                                Eventos sugeridos
+                            </p>
+                            <p class="mb-3 font-mono text-[10px] leading-snug text-zinc-600 dark:text-zinc-400">
+                                checkout.payment.paid, checkout.payment.failed, checkout.payment.refunded, checkout.payment.disputed
+                                <span class="text-zinc-500">e, se disponíveis,</span>
+                                card.payment.succeeded, card.payment.failed, card.payment.refunded, card.payment.disputed
+                            </p>
+                        </template>
+                        <p v-else class="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
                             Configure esta URL no painel do {{ gateway.name }} (notificações de pagamento).
                         </p>
-                        <div class="flex gap-2">
+                        <p class="mb-1 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">URL principal</p>
+                        <div class="mb-3 flex gap-2">
                             <input
                                 :value="gateway.webhook_url"
                                 type="text"
@@ -326,6 +358,26 @@ const canTestConnection = computed(() => {
                                 {{ webhookCopied ? 'Copiado!' : 'Copiar' }}
                             </button>
                         </div>
+                        <template v-if="gateway.webhook_url_secondary">
+                            <p class="mb-1 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">URL alternativa (mesmo endpoint)</p>
+                            <div class="flex gap-2">
+                                <input
+                                    :value="gateway.webhook_url_secondary"
+                                    type="text"
+                                    readonly
+                                    class="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                                />
+                                <button
+                                    type="button"
+                                    class="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                                    @click="copyWebhookUrlSecondary"
+                                >
+                                    <Check v-if="webhookCopiedSecondary" class="h-4 w-4 text-emerald-600" />
+                                    <Copy v-else class="h-4 w-4" />
+                                    {{ webhookCopiedSecondary ? 'Copiado!' : 'Copiar' }}
+                                </button>
+                            </div>
+                        </template>
                     </div>
 
                     <h3
@@ -343,7 +395,14 @@ const canTestConnection = computed(() => {
                                 class="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
                             >
                                 {{ field.label }}
+                                <span v-if="field.optional" class="ml-1 text-xs font-normal text-zinc-500">(opcional)</span>
                             </label>
+                            <p
+                                v-if="field.hint"
+                                class="mb-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400"
+                            >
+                                {{ field.hint }}
+                            </p>
                             <template v-if="field.type === 'file'">
                                 <input
                                     type="file"
@@ -378,6 +437,12 @@ const canTestConnection = computed(() => {
                                 :class="inputClass"
                                 autocomplete="off"
                             />
+                            <p
+                                v-if="field.key === 'webhook_signing_secret' && gateway.slug === 'cajupay' && gateway.webhook_signing_secret_set"
+                                class="mt-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+                            >
+                                Token já salvo neste servidor. Deixe o campo em branco para manter; cole um novo valor apenas se tiver rotacionado o secret no painel CajuPay.
+                            </p>
                         </div>
                     </div>
 

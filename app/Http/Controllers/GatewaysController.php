@@ -68,15 +68,24 @@ class GatewaysController extends Controller
             $raw = $decrypted[$key] ?? null;
             if ($type === 'boolean') {
                 $credentialValues[$key] = filter_var($raw, FILTER_VALIDATE_BOOLEAN);
+            } elseif ($key === 'webhook_signing_secret' && $raw !== null && (string) $raw !== '') {
+                // Nunca devolve o segredo ao browser; salvar em branco preserva o valor (update).
+                $credentialValues[$key] = '';
             } else {
                 $credentialValues[$key] = $raw !== null && $raw !== '' ? (string) $raw : '';
             }
         }
 
         $webhookUrl = null;
+        $webhookUrlSecondary = null;
         if ($slug === 'pushinpay') {
             $webhookRoute = $gateway['webhook_route'] ?? 'webhooks.' . $slug;
             $webhookUrl = Route::has($webhookRoute) ? route($webhookRoute) : null;
+        } elseif ($slug === 'cajupay' && Route::has('webhooks.cajupay')) {
+            $webhookUrl = route('webhooks.cajupay');
+            $webhookUrlSecondary = Route::has('webhooks.cajupay.checkout-alias')
+                ? route('webhooks.cajupay.checkout-alias')
+                : null;
         }
 
         $usesOauth = ! empty($gateway['oauth']);
@@ -111,6 +120,9 @@ class GatewaysController extends Controller
             'certificate_configured' => $certificateConfigured,
             'certificate_filename' => $certificateFilename && is_string($certificateFilename) ? $certificateFilename : null,
             'webhook_url' => $webhookUrl,
+            'webhook_url_secondary' => $webhookUrlSecondary,
+            'webhook_signing_secret_set' => $slug === 'cajupay'
+                && ! empty(trim((string) ($decrypted['webhook_signing_secret'] ?? ''))),
             'uses_oauth' => $usesOauth,
             'oauth_client_configured' => $oauthClientConfigured,
             'oauth_start_url' => $oauthStartUrl,
@@ -173,7 +185,12 @@ class GatewaysController extends Controller
                 $credentials[$key] = filter_var($v, FILTER_VALIDATE_BOOLEAN);
                 continue;
             }
-            $credentials[$key] = is_string($v) ? trim($v) : '';
+            $trimmed = is_string($v) ? trim($v) : '';
+            if ($key === 'webhook_signing_secret' && $trimmed === '' && ! empty($existingCredentials['webhook_signing_secret'])) {
+                $credentials[$key] = $existingCredentials['webhook_signing_secret'];
+                continue;
+            }
+            $credentials[$key] = $trimmed;
         }
 
         // Preserve existing certificate_path when nenhum novo arquivo foi enviado
@@ -189,6 +206,10 @@ class GatewaysController extends Controller
                     }
                 }
             }
+        }
+
+        if (! empty($existingCredentials['webhook_endpoint_id']) && empty($credentials['webhook_endpoint_id'] ?? null)) {
+            $credentials['webhook_endpoint_id'] = $existingCredentials['webhook_endpoint_id'];
         }
 
         if ($certificateKey && $request->hasFile($certificateKey)) {
@@ -253,13 +274,15 @@ class GatewaysController extends Controller
                 $rules[$key] = ['nullable', 'boolean'];
                 continue;
             }
-            $rules[$key] = ['required', 'string', 'max:2000'];
+            $optional = ! empty($keyDef['optional']);
+            $rules[$key] = $optional ? ['nullable', 'string', 'max:2000'] : ['required', 'string', 'max:2000'];
         }
         $validated = $request->validate($rules);
 
         $tenantId = auth()->user()->tenant_id;
         $credential = GatewayCredential::forTenant($tenantId)->where('gateway_slug', $slug)->first();
-        $credentials = $credential ? $credential->getDecryptedCredentials() : [];
+        $existingCredentials = $credential ? $credential->getDecryptedCredentials() : [];
+        $credentials = $existingCredentials;
         foreach ($credentialKeys as $keyDef) {
             $key = $keyDef['key'] ?? '';
             $type = $keyDef['type'] ?? 'text';
@@ -273,6 +296,15 @@ class GatewaysController extends Controller
             }
             if (is_string($v)) {
                 $credentials[$key] = trim($v);
+            }
+        }
+
+        foreach (['webhook_signing_secret', 'webhook_endpoint_id'] as $preserveKey) {
+            if (
+                (! isset($credentials[$preserveKey]) || $credentials[$preserveKey] === '' || $credentials[$preserveKey] === null)
+                && ! empty($existingCredentials[$preserveKey])
+            ) {
+                $credentials[$preserveKey] = $existingCredentials[$preserveKey];
             }
         }
 

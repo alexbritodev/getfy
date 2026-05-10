@@ -23,7 +23,8 @@ function getComponent(method) {
 const count = computed(() => (props.availablePaymentMethods || []).length);
 const gridClass = computed(() => {
     if (count.value <= 1) return 'grid-cols-1';
-    return 'grid-cols-2 sm:grid-cols-3';
+    // Mobile: uma coluna (um método por linha). A partir de sm: 2 cols, lg: até 3.
+    return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
 });
 const isFirstOfThree = (index) => count.value === 3 && index === 0;
 </script>
@@ -51,7 +52,7 @@ const isFirstOfThree = (index) => count.value === 3 && index === 0;
                 class="relative flex cursor-pointer items-center gap-3 rounded-xl border p-4 text-left transition focus:outline-none focus:ring-1 focus:ring-inset focus:ring-gray-300"
                 :class="[
                     modelValue === method.id ? 'border-gray-300 bg-gray-50/80' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50',
-                    isFirstOfThree(index) ? 'col-span-2 sm:col-span-1' : ''
+                    isFirstOfThree(index) ? 'sm:col-span-2 lg:col-span-1' : ''
                 ]"
                 :style="modelValue === method.id ? { borderColor: primaryColor, backgroundColor: primaryColor + '12' } : {}"
                 @click="select(method.id)"

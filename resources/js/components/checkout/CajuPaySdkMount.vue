@@ -7,6 +7,8 @@ const props = defineProps({
     sessionToken: { type: String, default: '' },
     initialPayer: { type: Object, default: () => ({}) },
     containerId: { type: String, default: 'cajupay-method' },
+    /** Apple/Google Pay: chamado imediatamente antes do 1º `confirm()` do SDK (materializar Order no Getfy). */
+    beforeWalletPrime: { type: Function, default: null },
 });
 
 const error = ref('');
@@ -112,6 +114,12 @@ async function primeCardField() {
     });
 
     try {
+        if (
+            (props.paymentMethod === 'apple_pay' || props.paymentMethod === 'google_pay')
+            && typeof props.beforeWalletPrime === 'function'
+        ) {
+            await props.beforeWalletPrime();
+        }
         await controller.value.confirm();
         cardFieldReady.value = true;
         error.value = '';

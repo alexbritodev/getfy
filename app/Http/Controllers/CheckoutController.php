@@ -1486,6 +1486,19 @@ class CheckoutController extends Controller
         $draftKey = 'cajupay_draft.' . $validated['polling_token'];
         $draft = Cache::get($draftKey);
         if (! is_array($draft)) {
+            // Pedido já materializado (ex.: Apple/Google Pay — confirm-order antes do 1º confirm do SDK);
+            // mesmo polling_token: devolve sucesso idempotente para o front continuar o fluxo.
+            $existingDisplay = session('cajupay_display.' . $validated['polling_token']);
+            if (is_array($existingDisplay) && ! empty($existingDisplay['order_id'])) {
+                return response()->json([
+                    'success' => true,
+                    'order_id' => (int) $existingDisplay['order_id'],
+                    'polling_token' => $validated['polling_token'],
+                    'polling_url' => route('checkout.order-status', ['token' => $validated['polling_token']]),
+                    'idempotent' => true,
+                ]);
+            }
+
             return response()->json(['message' => 'Sessão CajuPay expirada. Recarregue a página.'], 404);
         }
 

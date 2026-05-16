@@ -54,6 +54,7 @@ const props = defineProps({
     subscription_plan: { type: Object, default: null },
     /** Definido no servidor quando a URL traz `?preview=1` (preview no iframe do Builder). */
     checkout_builder_preview: { type: Boolean, default: false },
+    checkout_security: { type: Object, default: () => ({ requires_captcha: false, turnstile_site_key: null }) },
 });
 
 const previewConfig = ref(null);
@@ -460,6 +461,7 @@ const hasCustomBodyEnd = computed(() => String(customBodyEndHtml.value).trim() !
                             :card-gateway-keys="card_gateway_keys || {}"
                             :checkout-total-brl="checkoutTotalBrl"
                             :main-line-price-brl="mainLinePriceBrl"
+                            :checkout-security="checkout_security"
                             @coupon-applied="onCouponApplied"
                             @coupon-cleared="onCouponCleared"
                             @payment-approved="onPaymentApproved"

@@ -24,6 +24,7 @@ use App\Models\User;
 use App\Services\GeoIp;
 use App\Services\EfiPixRecorrenteService;
 use App\Services\StorageService;
+use App\Services\CheckoutAbuseGuard;
 use App\Services\PaymentService;
 use App\Services\PushinPayPixRecorrenteService;
 use App\Support\CheckoutCardContract;
@@ -412,6 +413,8 @@ class CheckoutController extends Controller
         /** Preview ao vivo no Builder (iframe): o front confia neste flag, não só na query (Inertia pode alterar URL). */
         $payload['checkout_builder_preview'] = $request->query('preview') === '1';
 
+        $payload['checkout_security'] = app(CheckoutAbuseGuard::class)->securityPropsForRequest($request, $product);
+
         return Inertia::render('Checkout/Show', $payload);
     }
 
@@ -467,7 +470,7 @@ class CheckoutController extends Controller
 
     public function process(Request $request): RedirectResponse|JsonResponse
     {
-        $product = Product::findOrFail($request->input('product_id'));
+        $product = Product::where('id', $request->input('product_id'))->where('is_active', true)->firstOrFail();
         $customerFields = $product->checkout_config['customer_fields'] ?? [];
 
         $productOfferIdForRules = $request->filled('product_offer_id') ? (int) $request->input('product_offer_id') : null;
@@ -572,6 +575,9 @@ class CheckoutController extends Controller
         }
         $validated = $request->validate($rules);
         $validated = $this->applyPagarmeCompanyAddressToValidated($validated, $product, $paymentService);
+
+        app(CheckoutAbuseGuard::class)->assertCanCreateCheckout($request, $product);
+
         $idempotencyKey = isset($validated['idempotency_key']) && trim((string) $validated['idempotency_key']) !== ''
             ? trim((string) $validated['idempotency_key'])
             : null;
@@ -1207,7 +1213,22 @@ class CheckoutController extends Controller
                 $paymentService = app(PaymentService::class);
                 $cardResult = $paymentService->createCardPayment($order, $product, $consumer, $card);
                 $status = $cardResult['status'] ?? null;
-                if (in_array($status, ['paid', 'settled', 'approved', 'completed'], true)) {
+                $requiresAction = ($status === 'requires_action') || ! empty($cardResult['client_secret']);
+                $isApproved = in_array($status, ['paid', 'settled', 'approved', 'completed'], true);
+                $asyncPendingStatuses = ['pending', 'in_process', 'processing', 'authorized', 'in_mediation'];
+                $statusNormalized = strtolower((string) $status);
+                if (! $isApproved && ! $requiresAction && ! in_array($statusNormalized, $asyncPendingStatuses, true)) {
+                    $this->rollbackFailedOrder($order, new \RuntimeException('card_payment_declined'));
+                    if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Pagamento recusado. Verifique os dados do cartão ou tente outro método.',
+                        ], 422);
+                    }
+
+                    return back()->with('error', 'Pagamento recusado. Verifique os dados do cartão ou tente outro método.');
+                }
+                if ($isApproved) {
                     $order->update(['status' => 'completed']);
                     $order->load('orderItems');
                     $grantAccessForOrder($order);

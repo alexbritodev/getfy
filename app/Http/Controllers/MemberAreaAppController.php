@@ -426,8 +426,8 @@ class MemberAreaAppController extends Controller
             abort(404);
         }
         $url = $urls[$fileIndex];
-        if (! preg_match('#^https?://#i', $url)) {
-            abort(404);
+        if (! \App\Support\SafeRemoteUrl::isAllowedHttpUrl($url)) {
+            abort(403, 'URL do arquivo não permitida.');
         }
 
         $this->progressService->ensureLessonStarted($lesson, $request->user());

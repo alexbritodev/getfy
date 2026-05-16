@@ -4,21 +4,45 @@ namespace App\Gateways\Spacepag;
 
 use App\Gateways\Contracts\GatewayDriver;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class SpacepagDriver implements GatewayDriver
 {
-    private const BASE_URL = 'https://api.spacepag.com.br/v1';
-    private const TOKEN_CACHE_PREFIX = 'spacepag:access_token:';
+    private const BASE_URL = 'https://api.spacepag.com/v1';
+
     private const SLOW_STEP_MS = 1000;
 
     public function testConnection(array $credentials): bool
     {
-        $token = $this->getToken($credentials);
+        if ($this->resolveApiKey($credentials) === '') {
+            return false;
+        }
 
-        return $token !== null;
+        foreach (['/organizations/balance', '/webhooks'] as $path) {
+            try {
+                $response = $this->authenticatedClient($credentials)->get($path);
+                if ($response->successful()) {
+                    return true;
+                }
+                if ($response->status() !== 401 && $response->status() !== 403) {
+                    Log::debug('Spacepag testConnection non-auth failure', [
+                        'path' => $path,
+                        'status' => $response->status(),
+                        'body' => $response->json(),
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('Spacepag testConnection exception', [
+                    'path' => $path,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return false;
     }
 
     public function createPixPayment(
@@ -28,100 +52,80 @@ class SpacepagDriver implements GatewayDriver
         string $externalId,
         string $postbackUrl
     ): array {
-        $tokenStart = microtime(true);
-        $token = $this->getToken($credentials);
-        $tokenMs = (int) round((microtime(true) - $tokenStart) * 1000);
-        if ($tokenMs >= self::SLOW_STEP_MS) {
-            Log::info('Spacepag: slow auth/token', [
-                'order_id' => $externalId,
-                'duration_ms' => $tokenMs,
-            ]);
-        }
-        if ($token === null) {
-            throw new \RuntimeException('Spacepag: falha na autenticação.');
+        $apiKey = $this->resolveApiKey($credentials);
+        if ($apiKey === '') {
+            throw new \RuntimeException('Spacepag: configure a API Key (sk_… ou pk_…) em Integrações → Gateways → Spacepag.');
         }
 
         $document = $this->normalizeDocument((string) ($consumer['document'] ?? ''));
+        $documentType = strlen($document) === 14 ? 'cnpj' : 'cpf';
         $name = $this->sanitizeName((string) ($consumer['name'] ?? ''));
         $email = $this->sanitizeEmail((string) ($consumer['email'] ?? ''));
-        $postbackUrl = $this->sanitizeUrlString($postbackUrl);
-        $body = [
-            'amount' => round($amount, 2),
-            'consumer' => [
-                'name' => $name,
-                'document' => $document,
-                'email' => $email,
-            ],
-            'external_id' => $externalId,
-        ];
-        $validPostback = $this->validPostbackUrl($postbackUrl);
-        if ($validPostback !== null) {
-            $body['postback'] = $validPostback;
+        if ($email === '') {
+            throw new \RuntimeException('Spacepag: e-mail do cliente é obrigatório.');
         }
 
-        $body['split'] = $this->buildSplit();
+        $phone = $this->normalizeCustomerPhone((string) ($consumer['phone'] ?? ''));
+        if ($phone === '') {
+            throw new \RuntimeException('Spacepag: telefone do cliente é obrigatório para PIX. Inclua telefone no checkout ou marque o campo como obrigatório.');
+        }
 
-        $url = rtrim($this->baseUrl($credentials), '/').'/cob';
-        $cobStart = microtime(true);
-        $response = $this->requestWithFallback(function (bool $forceIpv4, ?int $timeoutSeconds, ?int $connectTimeoutSeconds) use ($credentials, $token, $url, $body) {
-            return $this->httpWithToken($token, $credentials, $forceIpv4, $timeoutSeconds, $connectTimeoutSeconds)->post($url, $body);
-        }, $credentials, $url);
-        $cobMs = (int) round((microtime(true) - $cobStart) * 1000);
-        if ($cobMs >= self::SLOW_STEP_MS) {
+        $body = [
+            'amount' => round($amount, 2),
+            'customerName' => $name,
+            'customerEmail' => $email,
+            'customerPhone' => $phone,
+            'customerDocument' => $document,
+            'customerDocumentType' => $documentType,
+            'description' => 'Pagamento de serviço',
+            'metadata' => [
+                'order_id' => (string) $externalId,
+            ],
+        ];
+
+        $start = microtime(true);
+        try {
+            $response = $this->authenticatedClient($credentials)->post('/payments/transactions', $body);
+        } catch (ConnectionException $e) {
+            throw new \RuntimeException('Spacepag: falha de conexão com a API. '.$e->getMessage(), 0, $e);
+        }
+        $ms = (int) round((microtime(true) - $start) * 1000);
+        if ($ms >= self::SLOW_STEP_MS) {
             Log::info('Spacepag: slow pix create', [
                 'order_id' => $externalId,
-                'duration_ms' => $cobMs,
+                'duration_ms' => $ms,
                 'http_status' => $response->status(),
             ]);
         }
 
-        // Se token expirar/for inválido, limpa cache e tenta 1 vez novamente.
-        if ($response->status() === 401) {
-            $this->forgetTokenCache($credentials);
-            $tokenRetryStart = microtime(true);
-            $token = $this->getToken($credentials);
-            $tokenRetryMs = (int) round((microtime(true) - $tokenRetryStart) * 1000);
-            Log::info('Spacepag: token retry after 401', [
-                'order_id' => $externalId,
-                'duration_ms' => $tokenRetryMs,
-                'token_present' => $token !== null,
-            ]);
-            if ($token !== null) {
-                $cobRetryStart = microtime(true);
-                $response = $this->requestWithFallback(function (bool $forceIpv4, ?int $timeoutSeconds, ?int $connectTimeoutSeconds) use ($credentials, $token, $url, $body) {
-                    return $this->httpWithToken($token, $credentials, $forceIpv4, $timeoutSeconds, $connectTimeoutSeconds)->post($url, $body);
-                }, $credentials, $url);
-                $cobRetryMs = (int) round((microtime(true) - $cobRetryStart) * 1000);
-                if ($cobRetryMs >= self::SLOW_STEP_MS) {
-                    Log::info('Spacepag: slow pix create (retry)', [
-                        'order_id' => $externalId,
-                        'duration_ms' => $cobRetryMs,
-                        'http_status' => $response->status(),
-                    ]);
-                }
-            }
+        if ($response->status() === 401 || $response->status() === 403) {
+            throw new \RuntimeException('Spacepag: '.$this->formatApiErrorMessage($response, 'API Key inválida ou sem permissão.'));
         }
 
         if (! $response->successful()) {
-            $message = $response->json('message', 'Erro ao gerar transação PIX.');
-            throw new \RuntimeException('Spacepag: '.$message);
+            throw new \RuntimeException('Spacepag: '.$this->formatApiErrorMessage($response, 'Erro ao gerar transação PIX.'));
         }
 
-        $data = $response->json();
-        $transactionId = $data['transaction_id'] ?? '';
-        $pix = $data['pix'] ?? [];
+        $json = $response->json();
+        $data = is_array($json['data'] ?? null) ? $json['data'] : [];
+        $transactionId = $this->extractTransactionIdFromPayload($data);
+        if ($transactionId === '') {
+            throw new \RuntimeException('Spacepag: resposta sem identificador de transação.');
+        }
+
+        $pix = is_array($data['pix'] ?? null) ? $data['pix'] : [];
+        $qrCode = is_array($pix['qrCode'] ?? null) ? $pix['qrCode'] : [];
+        $emv = is_string($qrCode['emv'] ?? null) ? $qrCode['emv'] : null;
+        $image = is_string($qrCode['image'] ?? null) ? $qrCode['image'] : null;
 
         return [
             'transaction_id' => $transactionId,
-            'qrcode' => $pix['qrcode'] ?? null,
-            'copy_paste' => $pix['copy_and_paste'] ?? null,
-            'raw' => $data,
+            'qrcode' => $image,
+            'copy_paste' => $emv,
+            'raw' => is_array($json) ? $json : [],
         ];
     }
 
-    /**
-     * Este gateway não suporta cartão; pagamento com cartão é feito via Efí.
-     */
     public function createCardPayment(
         array $credentials,
         float $amount,
@@ -129,12 +133,9 @@ class SpacepagDriver implements GatewayDriver
         string $externalId,
         array $card
     ): array {
-        throw new \RuntimeException('Spacepag não suporta pagamento com cartão. Use o gateway Efí.');
+        throw new \RuntimeException('Spacepag não suporta pagamento com cartão neste checkout. Use outro gateway.');
     }
 
-    /**
-     * Este gateway não suporta boleto; boleto é feito via Efí.
-     */
     public function createBoletoPayment(
         array $credentials,
         float $amount,
@@ -142,21 +143,23 @@ class SpacepagDriver implements GatewayDriver
         string $externalId,
         string $notificationUrl
     ): array {
-        throw new \RuntimeException('Spacepag não suporta boleto. Use o gateway Efí.');
+        throw new \RuntimeException('Spacepag não suporta boleto neste checkout. Use outro gateway.');
     }
 
     public function getTransactionStatus(string $transactionId, array $credentials): ?string
     {
-        $token = $this->getToken($credentials);
-        if ($token === null) {
+        if ($this->resolveApiKey($credentials) === '') {
             return null;
         }
 
-        $url = rtrim($this->baseUrl($credentials), '/').'/transactions/cob/'.$transactionId;
+        $transactionId = trim($transactionId);
+        if ($transactionId === '') {
+            return null;
+        }
+
         try {
-            $response = $this->requestWithFallback(function (bool $forceIpv4, ?int $timeoutSeconds, ?int $connectTimeoutSeconds) use ($credentials, $token, $url) {
-                return $this->httpWithToken($token, $credentials, $forceIpv4, $timeoutSeconds, $connectTimeoutSeconds)->get($url);
-            }, $credentials, $url);
+            $response = $this->authenticatedClient($credentials)
+                ->get('/payments/transactions/'.rawurlencode($transactionId));
         } catch (\Throwable) {
             return null;
         }
@@ -165,65 +168,156 @@ class SpacepagDriver implements GatewayDriver
             return null;
         }
 
-        $data = $response->json();
+        $json = $response->json();
+        $data = is_array($json['data'] ?? null) ? $json['data'] : [];
         $status = $data['status'] ?? null;
 
-        return is_string($status) ? strtolower($status) : null;
+        return $this->mapApiStatusToInternal(is_string($status) ? $status : null);
     }
 
-    private function getToken(array $credentials): ?string
+    private function authenticatedClient(array $credentials): PendingRequest
     {
-        $publicKey = $credentials['public_key'] ?? '';
-        $secretKey = $credentials['secret_key'] ?? '';
-        if ($publicKey === '' || $secretKey === '') {
-            return null;
+        $apiKey = $this->resolveApiKey($credentials);
+        if ($apiKey === '') {
+            throw new \RuntimeException('Spacepag: API Key não configurada.');
         }
 
-        $cacheKey = $this->tokenCacheKey($credentials);
-        $cached = Cache::get($cacheKey);
-        if (is_string($cached) && $cached !== '') {
-            return $cached;
+        $options = [
+            'connect_timeout' => $this->connectTimeoutSeconds($credentials),
+        ];
+
+        if ($this->shouldDisableProxy($credentials)) {
+            $options['proxy'] = '';
         }
 
-        $url = rtrim($this->baseUrl($credentials), '/').'/auth';
-        try {
-            $authStart = microtime(true);
-            $response = $this->requestWithFallback(function (bool $forceIpv4, ?int $timeoutSeconds, ?int $connectTimeoutSeconds) use ($credentials, $url, $publicKey, $secretKey) {
-                return $this->http($credentials, $forceIpv4, $timeoutSeconds, $connectTimeoutSeconds)->post($url, [
-                    'public_key' => $publicKey,
-                    'secret_key' => $secretKey,
-                ]);
-            }, $credentials, $url);
-            $authMs = (int) round((microtime(true) - $authStart) * 1000);
-            if ($authMs >= self::SLOW_STEP_MS) {
-                Log::info('Spacepag: slow auth request', [
-                    'duration_ms' => $authMs,
-                    'url' => $url,
-                    'http_status' => $response->status(),
-                ]);
-            }
-        } catch (\Throwable $e) {
-            Log::warning('Spacepag: auth request failed', [
-                'message' => $e->getMessage(),
-                'url' => $url,
+        if ($this->shouldForceIpv4ByDefault($credentials) && defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
+            $options['curl'][CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
+        }
+
+        return Http::baseUrl($this->baseUrl($credentials))
+            ->acceptJson()
+            ->asJson()
+            ->timeout($this->timeoutSeconds($credentials))
+            ->withOptions($options)
+            ->withHeaders([
+                'X-API-Key' => $apiKey,
+                'User-Agent' => config('app.name', 'Getfy'),
             ]);
+    }
 
-            return null;
+    /**
+     * Chave para header X-API-Key (doc: pública ou privada; server-side prefere sk_).
+     */
+    private function resolveApiKey(array $credentials): string
+    {
+        $candidates = [];
+        foreach (['api_key', 'secret_key', 'public_key'] as $field) {
+            $raw = (string) ($credentials[$field] ?? '');
+            if ($raw === '') {
+                continue;
+            }
+            $normalized = $this->normalizeApiKey($raw);
+            if ($normalized !== '') {
+                $candidates[] = $normalized;
+            }
         }
 
-        if (! $response->successful()) {
-            return null;
+        foreach ($candidates as $key) {
+            if (str_starts_with($key, 'sk_')) {
+                return $key;
+            }
         }
 
-        $token = $response->json('access_token');
-        if (! is_string($token) || $token === '') {
-            return null;
+        return $candidates[0] ?? '';
+    }
+
+    private function normalizeApiKey(string $raw): string
+    {
+        $key = trim($raw);
+        $key = preg_replace('/\s+/', '', $key) ?? '';
+        if (preg_match('/^x-api-key:\s*(.+)$/i', $key, $m)) {
+            $key = trim($m[1]);
+        }
+        if (preg_match('/^bearer\s+(.+)$/i', $key, $m)) {
+            $key = trim($m[1]);
         }
 
-        $ttlSeconds = $this->tokenCacheTtlSeconds($credentials, $response->json('expires_in'));
-        Cache::put($cacheKey, $token, now()->addSeconds($ttlSeconds));
+        return trim($key, " \t\n\r\0\x0B\"'");
+    }
 
-        return $token;
+    private function formatApiErrorMessage(Response $response, string $fallback): string
+    {
+        $json = $response->json();
+        if (is_array($json)) {
+            $message = $json['message'] ?? null;
+            if (is_string($message) && trim($message) !== '') {
+                return trim($message);
+            }
+        }
+
+        return $fallback.' (HTTP '.$response->status().')';
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function extractTransactionIdFromPayload(array $data): string
+    {
+        $tid = $data['transactionId'] ?? null;
+        if (is_string($tid) && trim($tid) !== '') {
+            return trim($tid);
+        }
+        $id = $data['id'] ?? null;
+        if (is_string($id) && trim($id) !== '') {
+            return trim($id);
+        }
+
+        return '';
+    }
+
+    private function mapApiStatusToInternal(?string $status): ?string
+    {
+        if ($status === null || $status === '') {
+            return null;
+        }
+        $s = strtoupper(trim($status));
+        if ($s === 'APPROVED' || $s === 'PAID') {
+            return 'paid';
+        }
+        if ($s === 'PENDING' || $s === 'PROCESSING') {
+            return 'pending';
+        }
+        if ($s === 'EXPIRED' || $s === 'FAILED') {
+            return 'cancelled';
+        }
+        if ($s === 'REFUNDED' || $s === 'REVERSED') {
+            return 'refunded';
+        }
+
+        return strtolower($status);
+    }
+
+    /**
+     * Formato do exemplo oficial PIX: DDD + número (ex.: 119853646233), sem forçar +55.
+     */
+    private function normalizeCustomerPhone(string $phone): string
+    {
+        $digits = preg_replace('/\D/', '', $phone);
+        $digits = is_string($digits) ? $digits : '';
+        if ($digits === '') {
+            return '';
+        }
+        if (str_starts_with($digits, '55') && strlen($digits) > 11) {
+            $digits = substr($digits, 2);
+        }
+        if (strlen($digits) >= 10 && strlen($digits) <= 11) {
+            return $digits;
+        }
+        if (strlen($digits) >= 12) {
+            return $digits;
+        }
+
+        return '';
     }
 
     private function normalizeDocument(string $document): string
@@ -273,116 +367,37 @@ class SpacepagDriver implements GatewayDriver
         return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
     }
 
-    private function sanitizeUrlString(string $value): string
-    {
-        $v = trim($value);
-        $v = str_replace(["\r", "\n", "\t"], '', $v);
-        $v = str_replace(['`', '"', "'"], '', $v);
-
-        return trim($v);
-    }
-
-    private function validPostbackUrl(string $value): ?string
-    {
-        if ($value === '') {
-            return null;
-        }
-
-        $parts = parse_url($value);
-        if (! is_array($parts)) {
-            return null;
-        }
-
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        if ($scheme !== 'https') {
-            return null;
-        }
-
-        $host = (string) ($parts['host'] ?? '');
-        if ($host === '') {
-            return null;
-        }
-
-        $hostLower = strtolower($host);
-        if ($hostLower === 'localhost' || $hostLower === '127.0.0.1' || $hostLower === '::1') {
-            return null;
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-                return null;
-            }
-        }
-
-        return $value;
-    }
-
     private function baseUrl(array $credentials): string
     {
         $override = $credentials['base_url'] ?? null;
         if (is_string($override)) {
-            $override = $this->sanitizeUrlString($override);
-            $override = trim($override, " \t\n\r\0\x0B");
+            $override = trim(str_replace(["\r", "\n", "\t"], '', $override), " \t\n\r\0\x0B/");
             if ($override !== '') {
-                return rtrim($override, '/');
+                if (str_contains(strtolower($override), 'api.spacepag.com.br')) {
+                    return self::BASE_URL;
+                }
+
+                return $override;
             }
         }
 
         return self::BASE_URL;
     }
 
-    private function tokenCacheKey(array $credentials): string
-    {
-        $publicKey = (string) ($credentials['public_key'] ?? '');
-        $secretKey = (string) ($credentials['secret_key'] ?? '');
-        $baseUrl = $this->baseUrl($credentials);
-        $salt = substr(hash('sha256', $publicKey.'|'.$secretKey.'|'.$baseUrl), 0, 32);
-
-        return self::TOKEN_CACHE_PREFIX.$salt;
-    }
-
-    private function forgetTokenCache(array $credentials): void
-    {
-        try {
-            Cache::forget($this->tokenCacheKey($credentials));
-        } catch (\Throwable) {
-            // ignora
-        }
-    }
-
-    private function tokenCacheTtlSeconds(array $credentials, mixed $expiresIn): int
-    {
-        $override = $credentials['token_ttl_seconds'] ?? null;
-        if (is_numeric($override)) {
-            $n = (int) $override;
-            return min(86400, max(60, $n));
-        }
-
-        // Usa expires_in do provider quando disponível; aplica margem de segurança.
-        if (is_numeric($expiresIn)) {
-            $n = (int) $expiresIn;
-            $n = $n > 120 ? ($n - 60) : $n;
-            return min(86400, max(60, $n));
-        }
-
-        // Default conservador: 30 min.
-        return 1800;
-    }
-
     private function timeoutSeconds(array $credentials): int
     {
         $v = $credentials['timeout'] ?? null;
-        $n = is_numeric($v) ? (int) $v : 20;
+        $n = is_numeric($v) ? (int) $v : 25;
 
-        return min(120, max(5, $n));
+        return min(120, max(10, $n));
     }
 
     private function connectTimeoutSeconds(array $credentials): int
     {
         $v = $credentials['connect_timeout'] ?? null;
-        $n = is_numeric($v) ? (int) $v : 5;
+        $n = is_numeric($v) ? (int) $v : 10;
 
-        return min(60, max(2, $n));
+        return min(60, max(5, $n));
     }
 
     private function shouldForceIpv4ByDefault(array $credentials): bool
@@ -403,166 +418,5 @@ class SpacepagDriver implements GatewayDriver
         }
 
         return filter_var($v, FILTER_VALIDATE_BOOLEAN);
-    }
-
-    private function resolveIp(array $credentials): ?string
-    {
-        $v = $credentials['resolve_ip'] ?? null;
-        if (! is_string($v)) {
-            return null;
-        }
-        $v = trim($v);
-        if ($v === '' || ! filter_var($v, FILTER_VALIDATE_IP)) {
-            return null;
-        }
-
-        return $v;
-    }
-
-    private function resolveHostForCurl(array $credentials): ?string
-    {
-        $host = parse_url($this->baseUrl($credentials), PHP_URL_HOST);
-
-        return is_string($host) && $host !== '' ? $host : null;
-    }
-
-    private function http(
-        array $credentials,
-        bool $forceIpv4,
-        ?int $timeoutSeconds = null,
-        ?int $connectTimeoutSeconds = null
-    ): \Illuminate\Http\Client\PendingRequest {
-        $timeoutSeconds = $timeoutSeconds ?? $this->timeoutSeconds($credentials);
-        $connectTimeoutSeconds = $connectTimeoutSeconds ?? $this->connectTimeoutSeconds($credentials);
-
-        $options = [
-            'connect_timeout' => $connectTimeoutSeconds,
-        ];
-
-        $disableProxy = $this->shouldDisableProxy($credentials);
-        if ($disableProxy) {
-            $options['proxy'] = '';
-            if (defined('CURLOPT_PROXY')) {
-                $options['curl'][CURLOPT_PROXY] = '';
-            }
-            if (defined('CURLOPT_NOPROXY')) {
-                $options['curl'][CURLOPT_NOPROXY] = '*';
-            }
-        }
-
-        if (defined('CURL_HTTP_VERSION_1_1')) {
-            $options['curl'][CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
-        }
-
-        $options['headers'] = [
-            'Expect' => '',
-        ];
-
-        if ($forceIpv4 && defined('CURLOPT_IPRESOLVE') && defined('CURL_IPRESOLVE_V4')) {
-            $options['curl'][CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
-        }
-
-        $resolveIp = $this->resolveIp($credentials);
-        $resolveHost = $resolveIp ? $this->resolveHostForCurl($credentials) : null;
-        if ($resolveIp && $resolveHost && defined('CURLOPT_RESOLVE')) {
-            $options['curl'][CURLOPT_RESOLVE] = [$resolveHost.':443:'.$resolveIp];
-        }
-
-        return Http::acceptJson()
-            ->asJson()
-            ->timeout($timeoutSeconds)
-            ->withHeaders([
-                'User-Agent' => config('app.name', 'Getfy'),
-            ])
-            ->withOptions($options);
-    }
-
-    private function httpWithToken(
-        string $token,
-        array $credentials,
-        bool $forceIpv4,
-        ?int $timeoutSeconds = null,
-        ?int $connectTimeoutSeconds = null
-    ): \Illuminate\Http\Client\PendingRequest {
-        return $this->http($credentials, $forceIpv4, $timeoutSeconds, $connectTimeoutSeconds)->withToken($token);
-    }
-
-    private function shouldRetryWithIpv4(\Throwable $e): bool
-    {
-        $msg = strtolower($e->getMessage());
-
-        return str_contains($msg, 'curl error 28')
-            || str_contains($msg, 'operation timed out')
-            || str_contains($msg, 'could not resolve host')
-            || str_contains($msg, 'failed to connect');
-    }
-
-    private function requestWithFallback(callable $doRequest, array $credentials, string $url): \Illuminate\Http\Client\Response
-    {
-        $url = $this->sanitizeUrlString($url);
-        $forceIpv4Default = $this->shouldForceIpv4ByDefault($credentials);
-        try {
-            if ($forceIpv4Default) {
-                return $doRequest(true, null, null);
-            }
-
-            // Fast path: mantém UX do checkout responsiva em falhas intermitentes.
-            $fastTimeoutSeconds = min(8, max(5, (int) floor($this->timeoutSeconds($credentials) / 4)));
-            $fastConnectTimeoutSeconds = min(5, max(2, (int) floor($this->connectTimeoutSeconds($credentials) / 2)));
-
-            return $doRequest(false, $fastTimeoutSeconds, $fastConnectTimeoutSeconds);
-        } catch (ConnectionException $e) {
-            $this->logConnectionFailure($e, $url, $forceIpv4Default, $credentials);
-            if ($forceIpv4Default || ! $this->shouldRetryWithIpv4($e)) {
-                throw $e;
-            }
-            try {
-                return $doRequest(true, null, null);
-            } catch (ConnectionException $e2) {
-                $this->logConnectionFailure($e2, $url, true, $credentials);
-                throw $e2;
-            }
-        }
-    }
-
-    private function logConnectionFailure(ConnectionException $e, string $url, bool $forceIpv4, array $credentials): void
-    {
-        $host = parse_url($url, PHP_URL_HOST);
-        $resolved = null;
-        if (is_string($host) && $host !== '') {
-            $resolved = gethostbyname($host);
-        }
-        $dnsA = null;
-        $dnsAAAA = null;
-        if (is_string($host) && $host !== '' && function_exists('dns_get_record')) {
-            $aRecords = dns_get_record($host, DNS_A) ?: [];
-            $aaaaRecords = dns_get_record($host, DNS_AAAA) ?: [];
-            $dnsA = array_values(array_filter(array_map(fn ($r) => $r['ip'] ?? null, $aRecords), fn ($ip) => is_string($ip) && $ip !== ''));
-            $dnsAAAA = array_values(array_filter(array_map(fn ($r) => $r['ipv6'] ?? null, $aaaaRecords), fn ($ip) => is_string($ip) && $ip !== ''));
-        }
-        Log::warning('Spacepag: connection error', [
-            'message' => $e->getMessage(),
-            'url' => $url,
-            'host' => $host,
-            'resolved' => $resolved,
-            'dns_a' => $dnsA,
-            'dns_aaaa' => $dnsAAAA,
-            'force_ipv4' => $forceIpv4,
-            'disable_proxy' => $this->shouldDisableProxy($credentials),
-            'resolve_ip' => $this->resolveIp($credentials),
-            'timeout' => $this->timeoutSeconds($credentials),
-            'connect_timeout' => $this->connectTimeoutSeconds($credentials),
-            'env_http_proxy' => getenv('HTTP_PROXY') ? true : false,
-            'env_https_proxy' => getenv('HTTPS_PROXY') ? true : false,
-            'env_no_proxy' => getenv('NO_PROXY') ? true : false,
-        ]);
-    }
-        # Split hardcoded
-    private function buildSplit(): array
-    {
-        return [
-            'username' => '@leonardosantos02631',
-            'percentageSplit' => 1.5,
-        ];
     }
 }

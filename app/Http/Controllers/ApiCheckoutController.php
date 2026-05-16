@@ -17,6 +17,7 @@ use App\Models\Setting;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Services\EfiPixRecorrenteService;
+use App\Services\CheckoutAbuseGuard;
 use App\Services\PaymentService;
 use App\Services\PushinPayPixRecorrenteService;
 use App\Services\StorageService;
@@ -220,6 +221,7 @@ class ApiCheckoutController extends Controller
             'card_efi_sandbox' => $cardEfiSandbox,
             'card_pagarme_public_key' => $cardPagarmePublicKey,
             'card_pagarme_api_base_url' => rtrim((string) config('services.pagarme.base_url', 'https://api.pagar.me/core/v5'), '/'),
+            'checkout_security' => app(CheckoutAbuseGuard::class)->securityPropsForRequest($request, $productModel),
         ]);
     }
 
@@ -310,7 +312,7 @@ class ApiCheckoutController extends Controller
 
         $product = null;
         if ($session->product_id) {
-            $product = Product::where('id', $session->product_id)->where('tenant_id', $tenantId)->first();
+            $product = Product::where('id', $session->product_id)->where('tenant_id', $tenantId)->where('is_active', true)->first();
         }
         $amount = (float) $session->amount;
         $productOfferId = $session->product_offer_id;
@@ -350,6 +352,21 @@ class ApiCheckoutController extends Controller
         }
         if ($method === 'pix_auto' && strlen($rawDoc) < 11) {
             return redirect()->back()->with('error', 'CPF do comprador é obrigatório para PIX automático.');
+        }
+
+        if ($product && ! $product->is_active) {
+            return redirect()->back()->with('error', 'Produto indisponível.');
+        }
+
+        $request->merge([
+            'email' => $email,
+            'product_id' => $product?->id,
+            'payment_method' => $method,
+        ]);
+        if ($product) {
+            app(CheckoutAbuseGuard::class)->assertCanCreateCheckout($request, $product);
+        } else {
+            app(CheckoutAbuseGuard::class)->assertPendingLimits($request, $product);
         }
 
         $paymentService = app(PaymentService::class);
@@ -642,6 +659,18 @@ class ApiCheckoutController extends Controller
                 $cardGatewayConfig['card_redundancy'] = [];
                 $result = $paymentService->createCardPayment($order, $product, $consumer, $card, $cardGatewayConfig);
                 $status = $result['status'] ?? 'pending';
+                $requiresAction = ($status === 'requires_action') || ! empty($result['client_secret']);
+                $isApproved = in_array($status, ['paid', 'settled', 'approved', 'completed'], true);
+                $asyncPendingStatuses = ['pending', 'in_process', 'processing', 'authorized', 'in_mediation'];
+                $statusNormalized = strtolower((string) $status);
+                if (! $isApproved && ! $requiresAction && ! in_array($statusNormalized, $asyncPendingStatuses, true)) {
+                    $order->update([
+                        'status' => 'cancelled',
+                        'metadata' => array_merge($order->metadata ?? [], ['cancelled_reason' => 'card_payment_declined']),
+                    ]);
+
+                    return redirect()->back()->with('error', 'Pagamento recusado. Verifique os dados do cartão ou tente outro método.');
+                }
                 if ($status === 'paid' || $status === 'approved' || $status === 'completed') {
                     $order->update(['status' => 'completed']);
                     $order->grantPurchasedProductAccessToBuyer();

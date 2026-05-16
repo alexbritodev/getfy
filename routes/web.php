@@ -116,15 +116,22 @@ Route::get('/plugins/{slug}/assets/{path}', \App\Http\Controllers\PluginAssetCon
     ->name('plugins.asset');
 
 Route::get('/renovar/{token}', [\App\Http\Controllers\RenewalController::class, 'show'])->name('renewal.show')->where('token', '[a-zA-Z0-9]{32,64}');
-Route::post('/renovar', [\App\Http\Controllers\RenewalController::class, 'process'])->name('renewal.process')->middleware('throttle:30,1');
+Route::post('/renovar', [\App\Http\Controllers\RenewalController::class, 'process'])
+    ->name('renewal.process')
+    ->middleware(['throttle:checkout-process', 'throttle:checkout-pix', 'throttle:checkout-card', 'checkout.abuse']);
 
 // Checkout Pro (API): página hospedada – dados do cliente na sessão
 Route::get('/api-checkout/{token}', [\App\Http\Controllers\ApiCheckoutController::class, 'show'])->name('api-checkout.show')->where('token', '[a-zA-Z0-9\-]{36,64}');
-Route::post('/api-checkout/pay', [\App\Http\Controllers\ApiCheckoutController::class, 'process'])->name('api-checkout.process')->middleware('throttle:30,1');
+Route::post('/api-checkout/pay', [\App\Http\Controllers\ApiCheckoutController::class, 'process'])
+    ->name('api-checkout.process')
+    ->middleware(['throttle:checkout-process', 'throttle:checkout-pix', 'throttle:checkout-card', 'throttle:checkout-email', 'throttle:checkout-product-ip', 'checkout.abuse']);
 Route::get('/api-checkout/card-confirm', [\App\Http\Controllers\ApiCheckoutController::class, 'cardConfirm'])->name('api-checkout.card-confirm');
 Route::get('/api-checkout/obrigado', [\App\Http\Controllers\ApiCheckoutController::class, 'thankYou'])->name('api-checkout.thank-you');
 
-Route::get('/c/{slug}', [\App\Http\Controllers\CheckoutController::class, 'show'])->name('checkout.show')->where('slug', '[a-z0-9]{6,16}');
+Route::get('/c/{slug}', [\App\Http\Controllers\CheckoutController::class, 'show'])
+    ->name('checkout.show')
+    ->where('slug', '[a-z0-9]{6,16}')
+    ->middleware('throttle:checkout-show');
 Route::get('/checkout/pix', [\App\Http\Controllers\CheckoutController::class, 'pixPage'])->name('checkout.pix');
 Route::get('/checkout/boleto', [\App\Http\Controllers\CheckoutController::class, 'boletoPage'])->name('checkout.boleto');
 Route::get('/checkout/order-status', [\App\Http\Controllers\CheckoutController::class, 'orderStatus'])->name('checkout.order-status')->middleware('throttle:30,1');
@@ -137,14 +144,13 @@ Route::get('/payments/return/{order}', [\App\Http\Controllers\PaymentReturnContr
     ->middleware('throttle:60,1');
 Route::post('/checkout', [\App\Http\Controllers\CheckoutController::class, 'process'])
     ->name('checkout.process')
-    // Rate limit geral do endpoint + limite específico de PIX (3/5min por IP)
-    ->middleware(['throttle:30,1', 'throttle:checkout-pix']);
+    ->middleware(['throttle:checkout-process', 'throttle:checkout-pix', 'throttle:checkout-card', 'throttle:checkout-email', 'throttle:checkout-product-ip', 'checkout.abuse']);
 Route::post('/checkout/cajupay/session', [\App\Http\Controllers\CheckoutController::class, 'cajupaySession'])
     ->name('checkout.cajupay.session')
-    ->middleware('throttle:30,1');
+    ->middleware(['throttle:checkout-process', 'checkout.abuse']);
 Route::post('/checkout/cajupay/confirm-order', [\App\Http\Controllers\CheckoutController::class, 'cajupayConfirmOrder'])
     ->name('checkout.cajupay.confirm-order')
-    ->middleware('throttle:30,1');
+    ->middleware(['throttle:checkout-process', 'throttle:checkout-card', 'throttle:checkout-email', 'throttle:checkout-product-ip', 'checkout.abuse']);
 // Mesmo handler que webhooks.cajupay — URL alternativa usada em docs/curl da CajuPay
 Route::post('/checkout/cajupay/webhook', [\App\Http\Controllers\Webhooks\CajuPayWebhookController::class, 'handle'])
     ->name('webhooks.cajupay.checkout-alias')
@@ -159,7 +165,9 @@ Route::post('/checkout/validate-coupon', [\App\Http\Controllers\CheckoutControll
 Route::get('/checkout/upsell', [\App\Http\Controllers\UpsellController::class, 'upsellPage'])->name('checkout.upsell');
 Route::get('/checkout/downsell', [\App\Http\Controllers\UpsellController::class, 'downsellPage'])->name('checkout.downsell');
 Route::get('/checkout/obrigado', [\App\Http\Controllers\UpsellController::class, 'thankYouPage'])->name('checkout.thank-you');
-Route::post('/checkout/upsell/accept', [\App\Http\Controllers\UpsellController::class, 'acceptUpsell'])->name('checkout.upsell.accept')->middleware('throttle:30,1');
+Route::post('/checkout/upsell/accept', [\App\Http\Controllers\UpsellController::class, 'acceptUpsell'])
+    ->name('checkout.upsell.accept')
+    ->middleware(['throttle:checkout-process', 'throttle:checkout-pix', 'throttle:checkout-card', 'throttle:checkout-email', 'throttle:checkout-product-ip', 'checkout.abuse']);
 Route::post('/checkout/upsell/decline', [\App\Http\Controllers\UpsellController::class, 'declineUpsell'])->name('checkout.upsell.decline')->middleware('throttle:30,1');
 Route::post('/checkout/downsell/accept', [\App\Http\Controllers\UpsellController::class, 'acceptDownsell'])->name('checkout.downsell.accept')->middleware('throttle:30,1');
 Route::post('/checkout/downsell/decline', [\App\Http\Controllers\UpsellController::class, 'declineDownsell'])->name('checkout.downsell.decline')->middleware('throttle:30,1');

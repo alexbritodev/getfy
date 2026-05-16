@@ -124,6 +124,13 @@ async function testConnection() {
         if (k.key === certificateKey) continue;
         if ((k.type || 'text') === 'boolean') continue;
         if (k.optional) continue;
+        if (
+            gateway.value.slug === 'spacepag'
+            && k.key === 'api_key'
+            && gateway.value.api_key_configured
+        ) {
+            continue;
+        }
         const v = credentialValues.value[k.key];
         if (v == null || String(v).trim() === '') {
             testMessage.value = 'Preencha todas as credenciais obrigatórias para testar.';
@@ -442,6 +449,18 @@ const canTestConnection = computed(() => {
                                 class="mt-1.5 text-xs text-emerald-700 dark:text-emerald-300"
                             >
                                 Token já salvo neste servidor. Deixe o campo em branco para manter; cole um novo valor apenas se tiver rotacionado o secret no painel CajuPay.
+                            </p>
+                            <p
+                                v-if="field.key === 'api_key' && gateway.slug === 'spacepag' && gateway.api_key_configured"
+                                class="mt-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+                            >
+                                API Key já salva. Deixe em branco para manter; cole de novo só se tiver gerado uma nova chave no painel Spacepag.
+                            </p>
+                            <p
+                                v-if="field.key === 'webhook_secret' && gateway.slug === 'spacepag' && gateway.webhook_secret_set"
+                                class="mt-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+                            >
+                                Secret do webhook já salvo. Deixe em branco para manter.
                             </p>
                         </div>
                     </div>

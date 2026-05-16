@@ -94,14 +94,56 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
 
+        $checkoutProcessPerMinute = max(1, (int) config('checkout_security.rate.process_per_minute', 10));
+        RateLimiter::for('checkout-process', function (Request $request) use ($checkoutProcessPerMinute) {
+            return Limit::perMinute($checkoutProcessPerMinute)->by($request->ip());
+        });
+
+        $checkoutCardPerMinute = max(1, (int) config('checkout_security.rate.card_per_minute', 5));
+        RateLimiter::for('checkout-card', function (Request $request) use ($checkoutCardPerMinute) {
+            $method = strtolower((string) $request->input('payment_method', ''));
+            if ($method !== 'card') {
+                return Limit::none();
+            }
+
+            return Limit::perMinute($checkoutCardPerMinute)->by($request->ip());
+        });
+
         // Limite específico para geração de PIX no checkout (por IP).
         // Só conta quando payment_method === 'pix'. Para outros métodos não impõe limite extra.
-        RateLimiter::for('checkout-pix', function (Request $request) {
+        $checkoutPixPer5Min = max(1, (int) config('checkout_security.rate.pix_per_5_minutes', 3));
+        RateLimiter::for('checkout-pix', function (Request $request) use ($checkoutPixPer5Min) {
             $method = strtolower((string) $request->input('payment_method', ''));
             if ($method !== 'pix') {
                 return Limit::none();
             }
-            return Limit::perMinutes(5, 3)->by($request->ip());
+
+            return Limit::perMinutes(5, $checkoutPixPer5Min)->by($request->ip());
+        });
+
+        $checkoutEmailPerHour = max(1, (int) config('checkout_security.rate.email_per_hour', 8));
+        RateLimiter::for('checkout-email', function (Request $request) use ($checkoutEmailPerHour) {
+            $email = strtolower(trim((string) $request->input('email', '')));
+            if ($email === '') {
+                return Limit::none();
+            }
+
+            return Limit::perHour($checkoutEmailPerHour)->by(sha1($email));
+        });
+
+        $checkoutProductIpPerHour = max(1, (int) config('checkout_security.rate.product_ip_per_hour', 15));
+        RateLimiter::for('checkout-product-ip', function (Request $request) use ($checkoutProductIpPerHour) {
+            $productId = (string) $request->input('product_id', '');
+            if ($productId === '') {
+                return Limit::none();
+            }
+
+            return Limit::perHour($checkoutProductIpPerHour)->by($request->ip().'|'.$productId);
+        });
+
+        $checkoutShowPerMinute = max(30, (int) config('checkout_security.rate.show_per_minute', 120));
+        RateLimiter::for('checkout-show', function (Request $request) use ($checkoutShowPerMinute) {
+            return Limit::perMinute($checkoutShowPerMinute)->by($request->ip());
         });
 
         Queue::after(function (): void {

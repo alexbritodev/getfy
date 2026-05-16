@@ -6,6 +6,7 @@ import { User, UserRound, Mail, ShoppingBag, Loader2, CreditCard, Tag, Check, Pe
 import CheckoutDropdown from './CheckoutDropdown.vue';
 import CheckoutOrderBumps from './CheckoutOrderBumps.vue';
 import CheckoutPaymentMethods from './CheckoutPaymentMethods.vue';
+import CheckoutTurnstile from './CheckoutTurnstile.vue';
 import AsaasCard from './gateways/asaas/Card.vue';
 import CajuPaySdkMount from './CajuPaySdkMount.vue';
 import {
@@ -97,6 +98,30 @@ function getUtmPayload() {
 function appendUtms(payload) {
     Object.assign(payload, getUtmPayload(), readFbpFbcFromCookies());
     return payload;
+}
+
+const honeypotWebsite = ref('');
+const turnstileToken = ref('');
+const requiresCaptcha = computed(() => !!props.checkoutSecurity?.requires_captcha);
+const turnstileSiteKey = computed(() => props.checkoutSecurity?.turnstile_site_key || '');
+
+function appendCheckoutSecurity(payload) {
+    payload.website = honeypotWebsite.value;
+    if (turnstileToken.value) {
+        payload['cf-turnstile-response'] = turnstileToken.value;
+    }
+    return payload;
+}
+
+function ensureCaptchaBeforeSubmit() {
+    if (!requiresCaptcha.value || !turnstileSiteKey.value) {
+        return true;
+    }
+    if (String(turnstileToken.value || '').trim() !== '') {
+        return true;
+    }
+    form.setError('payment_method', 'Confirme a verificação de segurança antes de continuar.');
+    return false;
 }
 
 function buildPurchaseContentsForPixel() {
@@ -200,6 +225,7 @@ const props = defineProps({
     cardGatewayKeys: { type: Object, default: () => ({}) },
     /** Preço BRL só do produto principal (sem bumps), para contents do pixel. */
     mainLinePriceBrl: { type: Number, default: 0 },
+    checkoutSecurity: { type: Object, default: () => ({ requires_captcha: false, turnstile_site_key: null }) },
 });
 
 const emit = defineEmits(['coupon-applied', 'coupon-cleared', 'update:orderBumpIds', 'payment-approved']);
@@ -884,6 +910,7 @@ function buildCajuPaySessionPayload() {
             .filter((n) => !Number.isNaN(n));
     }
     appendUtms(payload);
+    appendCheckoutSecurity(payload);
     return payload;
 }
 
@@ -1311,6 +1338,7 @@ function submitCardWithMercadopagoFormData(formData) {
         payload.order_bump_ids = props.orderBumpIds.map((id) => (typeof id === 'number' ? id : parseInt(id, 10))).filter((n) => !Number.isNaN(n));
     }
     appendUtms(payload);
+    appendCheckoutSecurity(payload);
     return axios.post('/checkout', payload, {
         headers: {
             'Accept': 'application/json',
@@ -1643,6 +1671,7 @@ async function postCajuPayConfirmOrder() {
         phone: showPhone.value ? form.country_code + phoneDigits.value : '',
     };
     appendUtms(orderPayload);
+    appendCheckoutSecurity(orderPayload);
     const orderRes = await axios.post('/checkout/cajupay/confirm-order', orderPayload, {
         headers: {
             'Accept': 'application/json',
@@ -1756,6 +1785,9 @@ async function submitCajuPaySdkFlow(paymentMethod) {
 }
 
 function submit() {
+    if (!ensureCaptchaBeforeSubmit()) {
+        return;
+    }
     const methods = checkoutPaymentMethods.value;
     if (methods.length === 0) {
         form.setError('payment_method', 'Nenhum método de pagamento disponível.');
@@ -1830,6 +1862,7 @@ function submit() {
                 payload.order_bump_ids = props.orderBumpIds.map((id) => (typeof id === 'number' ? id : parseInt(id, 10))).filter((n) => !Number.isNaN(n));
             }
             appendUtms(payload);
+            appendCheckoutSecurity(payload);
             axios.post('/checkout', payload, {
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-XSRF-TOKEN': getCsrfToken() },
                 withCredentials: true,
@@ -1960,6 +1993,7 @@ function submit() {
                     payload.order_bump_ids = props.orderBumpIds.map((id) => (typeof id === 'number' ? id : parseInt(id, 10))).filter((n) => !Number.isNaN(n));
                 }
                 appendUtms(payload);
+                appendCheckoutSecurity(payload);
                 return axios.post('/checkout', payload, {
                     headers: {
                         'Accept': 'application/json',
@@ -2087,6 +2121,7 @@ function submit() {
         payload.address_state = (form.address_state || '').trim().slice(0, 2).toUpperCase();
     }
     appendUtms(payload);
+    appendCheckoutSecurity(payload);
     form.transform(() => payload).post('/checkout');
 }
 </script>
@@ -2912,6 +2947,22 @@ function submit() {
             </div>
 
             <p v-if="form.errors.product_id" class="text-sm font-medium text-red-600">{{ form.errors.product_id }}</p>
+            <input
+                v-model="honeypotWebsite"
+                type="text"
+                name="website"
+                autocomplete="off"
+                tabindex="-1"
+                aria-hidden="true"
+                class="pointer-events-none absolute -left-[9999px] h-0 w-0 overflow-hidden opacity-0"
+                data-checkout="honeypot"
+            />
+            <CheckoutTurnstile
+                v-if="requiresCaptcha && turnstileSiteKey"
+                v-model="turnstileToken"
+                :site-key="turnstileSiteKey"
+                class="mb-2"
+            />
             <button
                 v-if="(form.payment_method !== 'card' || !isCardGatewayMercadopago) && !isCajuPayWalletSdk"
                 type="submit"

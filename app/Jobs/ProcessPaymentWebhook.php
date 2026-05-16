@@ -170,7 +170,7 @@ class ProcessPaymentWebhook implements ShouldQueue
 
         if (in_array($this->event, ['order.refunded', 'payment.refunded'], true) && in_array($this->status, ['refunded', 'refund'], true)) {
             if ($order->status === 'completed') {
-                if (! $this->reconfirmGatewayStatus($order, ['cancelled'])) {
+                if (! $this->reconfirmGatewayStatus($order, ['cancelled', 'refunded'])) {
                     return;
                 }
                 $order->update(['status' => 'refunded']);

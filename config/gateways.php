@@ -47,8 +47,19 @@ return [
             'signup_url' => 'https://hub.spacepag.com.br/auth/jwt/sign-up?ref=4a5d0212320748719ee818cffdb93248',
             'driver' => \App\Gateways\Spacepag\SpacepagDriver::class,
             'credential_keys' => [
-                ['key' => 'public_key', 'label' => 'Chave pública', 'type' => 'text'],
-                ['key' => 'secret_key', 'label' => 'Chave secreta', 'type' => 'password'],
+                [
+                    'key' => 'api_key',
+                    'label' => 'API Key',
+                    'type' => 'password',
+                    'hint' => 'Cole a API Key exatamente como no painel Spacepag (header X-API-Key). No curl da documentação use YOUR_SECRET_TOKEN — em geral é a chave privada sk_live_… ou sk_test_…. Não cole o texto "X-API-Key:" antes do valor.',
+                ],
+                [
+                    'key' => 'webhook_secret',
+                    'label' => 'Secret do webhook (opcional)',
+                    'type' => 'password',
+                    'optional' => true,
+                    'hint' => 'Ao criar o webhook na Spacepag apontando para a URL do Getfy, copie o secret retornado. Com ele o Getfy valida o header X-Webhook-Signature (HMAC SHA-256 do corpo). Cadastre na Spacepag a URL: https://SEU_DOMINIO/webhooks/gateways/spacepag . Deixe em branco ao salvar para manter o secret já gravado.',
+                ],
             ],
         ],
         'efi' => [

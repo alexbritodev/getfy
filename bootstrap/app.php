@@ -51,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'member.area.access' => \App\Http\Middleware\EnsureMemberAreaAccess::class,
             'member.area.signed' => \App\Http\Middleware\SignedOrMemberAreaRedirect::class,
             'admin.tenant' => \App\Http\Middleware\EnsureAdminHasTenant::class,
+            'checkout.abuse' => \App\Http\Middleware\PreventCheckoutAbuse::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -101,6 +102,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('checkout:send-cart-recovery-emails')->everyMinute();
         $schedule->command('email-campaign:process')->everyMinute();
         $schedule->command('payments:reconcile-pending --limit=200 --days=45')->everyTwoMinutes();
+        $schedule->command('orders:cancel-stale-pending')->hourly();
         $schedule->command('schedule:heartbeat')->everyMinute();
         $schedule->job(new \App\Jobs\QueueHeartbeatJob)->everyMinute();
     })

@@ -68,7 +68,7 @@ class GatewaysController extends Controller
             $raw = $decrypted[$key] ?? null;
             if ($type === 'boolean') {
                 $credentialValues[$key] = filter_var($raw, FILTER_VALIDATE_BOOLEAN);
-            } elseif ($key === 'webhook_signing_secret' && $raw !== null && (string) $raw !== '') {
+            } elseif (in_array($key, ['api_key', 'webhook_secret', 'webhook_signing_secret'], true) && $raw !== null && (string) $raw !== '') {
                 // Nunca devolve o segredo ao browser; salvar em branco preserva o valor (update).
                 $credentialValues[$key] = '';
             } else {
@@ -123,6 +123,13 @@ class GatewaysController extends Controller
             'webhook_url_secondary' => $webhookUrlSecondary,
             'webhook_signing_secret_set' => $slug === 'cajupay'
                 && ! empty(trim((string) ($decrypted['webhook_signing_secret'] ?? ''))),
+            'api_key_configured' => $slug === 'spacepag' && (
+                trim((string) ($decrypted['api_key'] ?? '')) !== ''
+                || trim((string) ($decrypted['secret_key'] ?? '')) !== ''
+                || trim((string) ($decrypted['public_key'] ?? '')) !== ''
+            ),
+            'webhook_secret_set' => $slug === 'spacepag'
+                && ! empty(trim((string) ($decrypted['webhook_secret'] ?? ''))),
             'uses_oauth' => $usesOauth,
             'oauth_client_configured' => $oauthClientConfigured,
             'oauth_start_url' => $oauthStartUrl,
@@ -186,11 +193,25 @@ class GatewaysController extends Controller
                 continue;
             }
             $trimmed = is_string($v) ? trim($v) : '';
-            if ($key === 'webhook_signing_secret' && $trimmed === '' && ! empty($existingCredentials['webhook_signing_secret'])) {
-                $credentials[$key] = $existingCredentials['webhook_signing_secret'];
+            if (in_array($key, ['api_key', 'webhook_secret', 'webhook_signing_secret'], true) && $trimmed === '' && ! empty($existingCredentials[$key])) {
+                $credentials[$key] = $existingCredentials[$key];
                 continue;
             }
             $credentials[$key] = $trimmed;
+        }
+
+        if ($slug === 'spacepag') {
+            $normalizedKey = trim((string) ($credentials['api_key'] ?? ''));
+            if ($normalizedKey === '') {
+                foreach (['secret_key', 'public_key'] as $legacyKey) {
+                    if (! empty($existingCredentials[$legacyKey])) {
+                        $credentials[$legacyKey] = $existingCredentials[$legacyKey];
+                    }
+                }
+            } else {
+                $credentials['api_key'] = $normalizedKey;
+                unset($credentials['public_key'], $credentials['secret_key'], $credentials['base_url']);
+            }
         }
 
         // Preserve existing certificate_path when nenhum novo arquivo foi enviado
@@ -263,6 +284,10 @@ class GatewaysController extends Controller
         $credentialKeys = collect($gateway['credential_keys'] ?? []);
         $certificateKey = $gateway['certificate_key'] ?? null;
 
+        $tenantId = auth()->user()->tenant_id;
+        $credential = GatewayCredential::forTenant($tenantId)->where('gateway_slug', $slug)->first();
+        $existingCredentials = $credential ? $credential->getDecryptedCredentials() : [];
+
         $rules = [];
         foreach ($credentialKeys as $keyDef) {
             $key = $keyDef['key'] ?? '';
@@ -274,14 +299,18 @@ class GatewaysController extends Controller
                 $rules[$key] = ['nullable', 'boolean'];
                 continue;
             }
+            if ($slug === 'spacepag' && $key === 'api_key') {
+                $hasStored = trim((string) ($existingCredentials['api_key'] ?? '')) !== ''
+                    || trim((string) ($existingCredentials['secret_key'] ?? '')) !== ''
+                    || trim((string) ($existingCredentials['public_key'] ?? '')) !== '';
+                $rules[$key] = $hasStored ? ['nullable', 'string', 'max:2000'] : ['required', 'string', 'max:2000'];
+
+                continue;
+            }
             $optional = ! empty($keyDef['optional']);
             $rules[$key] = $optional ? ['nullable', 'string', 'max:2000'] : ['required', 'string', 'max:2000'];
         }
         $validated = $request->validate($rules);
-
-        $tenantId = auth()->user()->tenant_id;
-        $credential = GatewayCredential::forTenant($tenantId)->where('gateway_slug', $slug)->first();
-        $existingCredentials = $credential ? $credential->getDecryptedCredentials() : [];
         $credentials = $existingCredentials;
         foreach ($credentialKeys as $keyDef) {
             $key = $keyDef['key'] ?? '';
@@ -299,12 +328,20 @@ class GatewaysController extends Controller
             }
         }
 
-        foreach (['webhook_signing_secret', 'webhook_endpoint_id'] as $preserveKey) {
+        foreach (['api_key', 'webhook_secret', 'webhook_signing_secret', 'webhook_endpoint_id'] as $preserveKey) {
             if (
                 (! isset($credentials[$preserveKey]) || $credentials[$preserveKey] === '' || $credentials[$preserveKey] === null)
                 && ! empty($existingCredentials[$preserveKey])
             ) {
                 $credentials[$preserveKey] = $existingCredentials[$preserveKey];
+            }
+        }
+
+        if ($slug === 'spacepag' && trim((string) ($credentials['api_key'] ?? '')) === '') {
+            foreach (['secret_key', 'public_key'] as $legacyKey) {
+                if (! empty($existingCredentials[$legacyKey])) {
+                    $credentials[$legacyKey] = $existingCredentials[$legacyKey];
+                }
             }
         }
 

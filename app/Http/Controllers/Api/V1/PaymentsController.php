@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\ProductOffer;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
+use App\Services\CheckoutAbuseGuard;
 use App\Services\PaymentService;
 use App\Support\FakeConsumerData;
 use Illuminate\Http\JsonResponse;
@@ -112,10 +113,16 @@ class PaymentsController extends Controller
         $periodEnd = null;
 
         if ($productId !== null && $productId !== '') {
-            $product = Product::where('id', $productId)->where('tenant_id', $tenantId)->first();
+            $product = Product::where('id', $productId)->where('tenant_id', $tenantId)->where('is_active', true)->first();
             if (! $product) {
-                abort(422, 'Produto não encontrado.');
+                abort(422, 'Produto não encontrado ou indisponível.');
             }
+            $request->merge([
+                'email' => $userConsumer['consumer']['email'] ?? $request->input('customer.email'),
+                'product_id' => $product->id,
+                'payment_method' => $request->input('payment_method', 'pix'),
+            ]);
+            app(CheckoutAbuseGuard::class)->assertCanCreateCheckout($request, $product);
             $offer = $productOfferId ? ProductOffer::where('id', $productOfferId)->where('product_id', $product->id)->first() : null;
             $plan = $subscriptionPlanId ? SubscriptionPlan::where('id', $subscriptionPlanId)->where('product_id', $product->id)->first() : null;
             if ($offer) {
